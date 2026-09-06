@@ -3,13 +3,20 @@
 Instantiation proves the bindings resolve; it does not prove collapsing works.
 This drives the component the way a user would -- call toggleGroup() on the
 two key kinds (major = group's first segment, e.g. "Image"; sub = full group,
-e.g. "Image/Edit"), then read back the actual delegate geometry and every
-section delegate's forked state -- and asserts the expected outcome.
+e.g. "Image/Edit"), then read back the realized row geometry and asserts the
+expected stack: no overlap, no hole, contentHeight correct -- sampled AFTER
+animations settle AND mid-animation (the positioner must reflow every frame).
+
+Layout mechanism note: ScriptOutliner is a Flickable + Column + Repeater
+(since the section-delegate rewrite). Ordinary rows' height changes reflow the
+positioner correctly every frame, which is exactly what the mid-animation
+sampling below asserts; there is no relayout timer / criteria swap to test
+anymore.
 
 Runs headless with no GL: we instantiate ScriptOutliner directly (not through
-main.qml) so there is no ShaderEffectSource/FastBlur in the tree. A ListView
-still creates and lays out its delegates without a scene graph, which is all we
-need to read heights from.
+main.qml) so there is no ShaderEffectSource/FastBlur in the tree. The positioner
+lays out its children without a scene graph, which is all we need to read
+heights from.
 """
 import os
 import sys
@@ -33,10 +40,9 @@ qml_dir = os.path.abspath(sys.argv[1])
 app = QGuiApplication(sys.argv[:1])
 
 # Must be a real QQuickView, not a bare QQmlComponent. A windowless component
-# creates its delegates but never runs the layout/polish pass, so
-# ListView.contentHeight stays pinned at the view height and the collapse
-# assertion silently passes on a meaningless number. With a window it reports
-# real geometry.
+# creates its delegates but never runs the layout/polish pass, so heights can
+# stay pinned at placeholder values and a collapse assertion silently passes
+# on a meaningless number. With a window everything reports real geometry.
 view = QQuickView()
 view.engine().addImportPath(qml_dir)
 
@@ -49,8 +55,8 @@ view.rootContext().setContextProperty("scriptModel", model)
 warnings = []
 view.engine().warnings.connect(lambda ws: warnings.extend(w.toString() for w in ws))
 
-# Wrap ScriptOutliner so it gets a real size -- a zero-sized ListView creates
-# no delegates and every height reads back 0, which would look like a pass.
+# Wrap ScriptOutliner so it gets a real size -- a zero-sized view lays nothing
+# out and every height reads back 0, which would look like a pass.
 # The wrapper exposes plain-typed JS shims rather than the ScriptOutliner
 # object itself: PySide2 cannot marshal a QML-defined type back to Python
 # ("Can't find converter for 'ScriptOutliner_QMLTYPE_*'"), but bool/int/string
@@ -67,8 +73,10 @@ Item {
     function expanded(g)    { return ol.isExpanded(g); }
     function toggle(g)      { return ol.toggleGroup(g); }
     function hoverDesc()    { return ol.hoverDesc; }
+    // layoutStore 的恢复路径走同一个入口：整体赋值 expandedGroups。
+    function setExpanded(m) { ol.expandedGroups = m; }
 
-    // Locate the ListView by objectName. Duck-typing on contentHeight does
+    // Locate the view by objectName. Duck-typing on contentHeight does
     // not work: Text also has a contentHeight, so a property probe silently
     // matches the wrong node and reports a plausible-looking number.
     function findList() {
@@ -77,74 +85,93 @@ Item {
                 return ol.children[i];
         return null;
     }
+    function findColumn() {
+        var l = findList();
+        if (!l) return null;
+        var ch = l.contentItem.children;
+        for (var i = 0; i < ch.length; ++i)
+            if (ch[i].objectName === "rowsColumn")
+                return ch[i];
+        return null;
+    }
     // contentHeight is the real proof that collapsed rows stop taking space:
     // isExpanded() reports intent, this reports layout.
     function listContentHeight() { var l = findList(); return l ? l.contentHeight : -1; }
-    function listCount()         { var l = findList(); return l ? l.count : -1; }
+    // 行永远全量存在（折叠不销毁行），断言"折叠不改行身份"用。
+    function listRowCount() {
+        var c = findColumn();
+        if (!c) return -1;
+        var n = 0;
+        for (var i = 0; i < c.children.length; ++i)
+            if (c.children[i].item && c.children[i].item.objectName === "scriptRow")
+                ++n;
+        return n;
+    }
 
-    // Two-level headers: each section delegate renders up to two rows -- a
-    // major header row (only on the major's first section, the "carrier") and
-    // a sub header row (every group containing "/"). Collect both rows'
-    // title/badge/height so Python can assert the fork and the badge sums.
-    function headers() {
-        var l = findList();
-        if (!l || !l.contentItem)
-            return [];
+    // ---- realized rows: kind/key/title/badge/geometry, top to bottom ----
+    // rowsColumn.children 是 Loader（其 item 才是行根）和 footer Item。
+    function rows() {
+        var c = findColumn();
+        if (!c) return [];
         var out = [];
-        // contentItem.children, not childItems: the latter is a
-        // QQmlListProperty and reads as undefined from QML JS.
-        var items = l.contentItem.children;
-        for (var i = 0; i < items.length; ++i) {
-            var it = items[i];
-            if (it.objectName !== "sectionHeader")
+        var kids = c.children;
+        for (var i = 0; i < kids.length; ++i) {
+            var ld = kids[i];
+            if (ld.objectName === "listFooter") {
+                out.push({ tag: "FOOTER", key: "", title: "",
+                           badge: "", badgeVisible: false,
+                           y: ld.y, h: ld.height, clip: true });
                 continue;
+            }
+            var it = ld.item;
+            if (!it) continue;
             out.push({
-                section: it.headerSection,
-                majorTitle: it.majorRowTitle,
-                majorHeight: it.majorRowHeight,
-                majorBadge: it.majorRowBadge,
-                majorBadgeVisible: it.majorRowBadgeVisible,
-                subTitle: it.subRowTitle,
-                subHeight: it.subRowHeight,
-                subBadge: it.subRowBadge,
-                subBadgeVisible: it.subRowBadgeVisible,
-                // 防回归锚点：高度归零的 delegate 靠 delegate clip + 子行
-                // clip 保证"什么都不画、不收事件"。delegate 根节点的
-                // visible 被 ListView 命令式管理、绑定会被杀（2026-09-07
-                // 实测，见 positioner 踩坑记录），所以不能也不需要用
-                // visible 门；subRow 必须自 clip（carrier delegate 收起后
-                // 仍可见，子分类行高度归零时内容要被裁掉）。
-                delegateClip: it.clip,
-                delegateHeight: it.height,
-                subClip: it.subRowClip
+                tag: it.objectName,
+                key: it.rowKey !== undefined ? it.rowKey : "",
+                title: it.rowTitle !== undefined ? it.rowTitle : "",
+                badge: it.rowBadge !== undefined ? it.rowBadge : "",
+                badgeVisible: it.rowBadgeVisible === true,
+                y: ld.y, h: ld.height,
+                clip: it.clip === true
             });
         }
         return out;
     }
 
-    // ---- geometry stack probe (section relayout regression, 2026-09-07) ----
-    // Qt 5.15 的 ListView 不把 section delegate 的高度变化当作重排触发器，
-    // 折叠后下方的 section/item 会停在旧 y（重叠或空洞），contentHeight 也
-    // 不重算。ScriptOutliner 用 criteria 重触发修复；这里把每个非零高
-    // delegate 的 (kind, key, y, h) 原样带回，Python 侧按期望栈逐位断言
-    // "无重叠、无空洞、contentHeight 正确"。零高度 delegate 不占位，
-    // 过滤掉再比。
-    function stack() {
-        var l = findList();
-        if (!l || !l.contentItem)
-            return [];
+    // ---- mid-animation sampling ----
+    // 位置器必须每帧重排：动画进行中（height 未收敛）几何栈也不允许有
+    // 交叠/空洞。Python 侧在 toggle 后不等 settle 就采样。
+    function midHeights() {
+        var c = findColumn();
+        if (!c) return [];
         var out = [];
-        var items = l.contentItem.children;
-        for (var i = 0; i < items.length; ++i) {
-            var it = items[i];
-            if (it.objectName === "sectionHeader")
-                out.push({ tag: "SEC", key: it.headerSection, y: it.y, h: it.height });
-            else if (it.objectName === "scriptRow")
-                out.push({ tag: "ROW", key: it.rowGroup, y: it.y, h: it.height });
-        }
-        if (l.footerItem)
-            out.push({ tag: "FOOTER", key: "", y: l.footerItem.y, h: l.footerItem.height });
+        for (var i = 0; i < c.children.length; ++i)
+            out.push({ y: c.children[i].y, h: c.children[i].height });
         return out;
+    }
+
+    // ---- row identity probe (flicker regression) ----
+    // 折叠绝不重建行（重建 = 悬停丢失/状态重放，就是上一版闪烁的机制）。
+    // Stash 一个脚本行的 QObject，toggle 后报告同一路径的行是否仍是它。
+    // Touching a stashed wrapper of a destroyed row throws, which itself
+    // proves recreation -- both paths return false.
+    property var _stashedRow: null
+    function findRow(filePath) {
+        var c = findColumn();
+        if (!c) return null;
+        for (var i = 0; i < c.children.length; ++i) {
+            var it = c.children[i].item;
+            if (it && it.objectName === "scriptRow" && it.rowFilePath === filePath)
+                return it;
+        }
+        return null;
+    }
+    function stashRow(filePath) { _stashedRow = findRow(filePath); return _stashedRow !== null; }
+    function rowSame() {
+        if (_stashedRow === null)
+            return false;
+        var cur = findRow(_stashedRow.rowFilePath);
+        return cur === _stashedRow;
     }
 
     // Identity probe: stash the current map, then report whether the property
@@ -153,66 +180,6 @@ Item {
     property var _stashed: null
     function stash()        { _stashed = ol.expandedGroups; }
     function isSameObject() { return _stashed === ol.expandedGroups; }
-
-    // ---- section delegate identity probe (flicker regression, 2026-09-07) ----
-    // Stash the QObject of one section delegate and later report whether a
-    // live delegate with the same section IS that object. Touching a stashed
-    // wrapper of a destroyed delegate throws, which itself proves recreation
-    // -- both paths return false.
-    property var _stashedSec: null
-    function findSection(key) {
-        var l = findList();
-        if (!l || !l.contentItem)
-            return null;
-        var items = l.contentItem.children;
-        for (var i = 0; i < items.length; ++i)
-            if (items[i].objectName === "sectionHeader"
-                    && items[i].headerSection === key)
-                return items[i];
-        return null;
-    }
-    function stashSection(key) { _stashedSec = findSection(key); return _stashedSec !== null; }
-    function sectionSame() {
-        if (_stashedSec === null)
-            return false;
-        var cur = null;
-        var l = findList();
-        if (l && l.contentItem) {
-            var items = l.contentItem.children;
-            for (var i = 0; i < items.length; ++i) {
-                if (items[i].objectName !== "sectionHeader")
-                    continue;
-                try {
-                    if (items[i].headerSection === _stashedSec.headerSection)
-                        cur = items[i];
-                } catch (e) {
-                    return false;
-                }
-            }
-        }
-        return cur === _stashedSec;
-    }
-
-    // ---- sectionRelayoutTimer trigger counter (flicker regression) ----
-    // The criteria swap makes every section delegate's attached section value
-    // flip through its FirstCharacter form ("Image/Edit" -> "I") and back;
-    // bindings re-evaluate against the wrong section, and the re-evaluation
-    // is not fully synchronous -- deferred passes leak past the swap and
-    // start Behaviors (chevron rotation replay) plus recompute hover
-    // geometry (hover fill flashes). toggleGroup() must therefore fire the
-    // timer ONLY on the pure section path (no item-height animation). The
-    // timer carries objectName "sectionRelayoutTimer"; count its triggered()
-    // signals here. The Timer lives among the outliner's non-visual
-    // resources, not its visual children.
-    property int relayoutCount: 0
-    Component.onCompleted: {
-        for (var i = 0; i < ol.resources.length; ++i) {
-            var r = ol.resources[i];
-            if (r && r.objectName === "sectionRelayoutTimer")
-                r.triggered.connect(function() { ++relayoutCount; });
-        }
-    }
-    function relayouts() { return relayoutCount; }
 }
 """
 # Written next to the real QML: implicit directory imports (finding
@@ -272,8 +239,7 @@ GROUPS = sorted({d["group"] for d in DATA})
 MAJORS = sorted({major_of(g) for g in GROUPS})
 SUBGROUPS = sorted({g for g in GROUPS if "/" in g})
 
-# Section order == deduped DATA row order (the registry sorts by relative
-# path, so this is exactly the order ListView emits sections in).
+# Row order == deduped DATA row order (the registry sorts by relative path).
 SECTIONS = []
 _seen = set()
 for _d in DATA:
@@ -281,128 +247,76 @@ for _d in DATA:
         _seen.add(_d["group"])
         SECTIONS.append(_d["group"])
 
-FIRST_OF_MAJOR = {}
+# 大类按首现序（模型行序），不是字母序 —— rowList 按 sectionTree 的插入序展开。
+MAJOR_ORDER = []
 for _g in SECTIONS:
-    FIRST_OF_MAJOR.setdefault(major_of(_g), _g)
+    _m = major_of(_g)
+    if _m not in MAJOR_ORDER:
+        MAJOR_ORDER.append(_m)
+
+HAS_SUBS = {m: any(s != m for s in SECTIONS if major_of(s) == m) for m in MAJOR_ORDER}
+# 组间隙的分账：有子分类的大类头后紧跟子分类头（不留隙），无子分类的大类头
+# 后直接是脚本行（间隙烘在大类头里）。
+MAJOR_H = {m: MAJOR_RAW + (0 if HAS_SUBS[m] else GAP) for m in MAJOR_ORDER}
 
 
 def major_total(m):
     return sum(row_count(g) for g in SECTIONS if major_of(g) == m)
 
 
-def key_open(key, open_majors, open_subs):
-    """Expansion state of one expandedGroups key.
-
-    Sub keys (containing "/") live in open_subs; bare major keys live in
-    open_majors (for a group without "/", the major key IS the full-group
-    key, so one toggle drives both).
-    """
-    if "/" in key:
-        return key in open_subs
-    return key in open_majors
-
-
-def expected_height(open_majors, open_subs):
-    """contentHeight for a given expansion state.
-
-    open_majors: expanded major keys (first segments);
-    open_subs:   expanded sub keys (full group strings).
-    Each section delegate renders up to two header rows: the major's FIRST
-    section always carries a major header (34px); every group containing "/"
-    renders a sub header (28px) that only takes space while its major is
-    expanded. Rows need the major AND the full-group key open. The per-
-    delegate group gap (4px) only applies while the delegate still shows at
-    least one row -- fully hidden delegates must collapse to exactly 0.
-    """
-    total = 0
-    for m in MAJORS:
-        secs = [s for s in SECTIONS if major_of(s) == m]
-        for pos, g in enumerate(secs):
-            first = pos == 0
-            has_sub = "/" in g
-            h = (MAJOR_RAW if first else 0) \
-                + (SUB_RAW if has_sub and m in open_majors else 0)
-            if h > 0:
-                h += GAP
-            total += h
-            # Rows need the major open AND the full-group key open; for a
-            # group without "/" the full-group key IS the major key, so the
-            # second check collapses into the first.
-            if m in open_majors and (not has_sub or g in open_subs):
-                total += ROW * row_count(g)
-    return total + FOOTER
-
-
-def expected_rows(open_majors, open_subs):
-    """(section, majorTitle, majorHeight, majorBadge, majorBadgeVisible,
-    subTitle, subHeight, subBadge, subBadgeVisible) per section delegate."""
-    rows = []
-    for g in SECTIONS:
-        m = major_of(g)
-        first = FIRST_OF_MAJOR[m] == g
-        has_sub = "/" in g
-        if first:
-            mj_title, mj_h = m, MAJOR_RAW
-            mj_badge, mj_vis = str(major_total(m)), m not in open_majors
-        else:
-            mj_title, mj_h, mj_badge, mj_vis = "", 0, "", False
-        if has_sub:
-            sb_title = g.split("/", 1)[1]
-            sb_h = SUB_RAW if m in open_majors else 0
-            sb_badge, sb_vis = str(row_count(g)), g not in open_subs
-        else:
-            sb_title, sb_h, sb_badge, sb_vis = "", 0, "", False
-        rows.append((g, mj_title, mj_h, mj_badge, mj_vis,
-                     sb_title, sb_h, sb_badge, sb_vis))
-    return rows
 def expected_stack(open_majors, open_subs):
     """The visual stack as (kind, key, height) top-to-bottom.
 
-    kind is "SEC" (section delegate), "ROW" (script row) or "FOOTER". Same
-    math as expected_height(), but positional: the section relayout probe
-    (check_stack) walks this and asserts every delegate's y/height so a
-    stale Qt 5.15 section layout (overlap or hole below a folded section)
-    cannot pass unnoticed.
+    kind is "MAJOR", "SUB", "ROW" (script row) or "FOOTER". Follows the same
+    order the QML rowList walks: model row order, each major's first section
+    carrying the major header. Sub headers take space while their major is
+    expanded (the 4px group gap rides on them); rows need the major AND the
+    full-group key open. Zero-height rows are filtered by the caller before
+    the positional walk.
     """
     blocks = []
     first_seen = set()
     for g in SECTIONS:
         m = major_of(g)
-        first = m not in first_seen
-        if first:
+        if m not in first_seen:
             first_seen.add(m)
+            blocks.append(("MAJOR", m, MAJOR_H[m]))
+        if m not in open_majors:
+            continue
         has_sub = "/" in g
-        h = (MAJOR_RAW if first else 0) \
-            + (SUB_RAW if has_sub and m in open_majors else 0)
-        if h > 0:
-            h += GAP
-            blocks.append(("SEC", g, h))
-        if m in open_majors and (not has_sub or g in open_subs):
-            for _ in range(row_count(g)):
-                blocks.append(("ROW", g, ROW))
+        if has_sub:
+            blocks.append(("SUB", g, SUB_RAW + GAP))
+        if not has_sub or g in open_subs:
+            blocks.extend([("ROW", g, ROW)] * row_count(g))
     blocks.append(("FOOTER", "", FOOTER))
     return blocks
 
 
-def qml_stack():
-    v = root.stack()
-    if hasattr(v, "toVariant"):
-        return v.toVariant()
-    return v if v is not None else []
+def expected_height(open_majors, open_subs):
+    return sum(h for (_, _, h) in expected_stack(open_majors, open_subs))
+
+
+# QML objectName -> expected stack tag.
+TAG_MAP = {"majorHeader": "MAJOR", "subHeader": "SUB", "scriptRow": "ROW"}
+
+
+def qml_rows():
+    v = root.rows()
+    rows = v.toVariant() if hasattr(v, "toVariant") else (v if v is not None else [])
+    for s in rows:
+        s["tag"] = TAG_MAP.get(s["tag"], s["tag"])
+    return rows
 
 
 def check_stack(label, open_majors, open_subs):
-    """Assert the realized delegate stack has no overlap and no hole.
+    """Assert the realized stack has no overlap and no hole.
 
-    Zero-height delegates occupy no space on either side, so both the
-    expected blocks and the realized stack drop them before the positional
-    walk (cumulative-y comparison with 0.5px tolerance).
+    Zero-height rows occupy no space, so both the expected blocks and the
+    realized stack drop them before the positional walk (cumulative-y
+    comparison with 0.5px tolerance).
     """
-    # Sort by y: the criteria retrigger recreates section delegates, and
-    # contentItem.children order (creation order) is no longer the visual
-    # order -- the y coordinates are. SEC sorts before ROW at equal y.
-    got = [s for s in qml_stack() if float(s["h"]) > 0.5]
-    got.sort(key=lambda s: (float(s["y"]), 0 if s["tag"] == "SEC" else 1))
+    got = [s for s in qml_rows() if float(s["h"]) > 0.5]
+    got.sort(key=lambda s: float(s["y"]))
     want = [b for b in expected_stack(open_majors, open_subs) if b[2] > 0]
     if len(got) != len(want):
         print(f"  [FAIL] {label}: stack size got {len(got)}, want {len(want)}")
@@ -413,10 +327,8 @@ def check_stack(label, open_majors, open_subs):
     problems = []
     y = 0.0
     for i, (s, (etag, ekey, eh)) in enumerate(zip(got, want)):
-        stag = s["tag"]
-        if stag != etag or (etag == "SEC" and s["key"] != ekey) \
-                or (etag == "ROW" and s["key"] != ekey):
-            problems.append(f"pos {i}: got {stag}:{s['key']} want {etag}:{ekey}")
+        if s["tag"] != etag or s["key"] != ekey:
+            problems.append(f"pos {i}: got {s['tag']}:{s['key']} want {etag}:{ekey}")
         if abs(float(s["y"]) - y) > 0.5:
             problems.append(f"pos {i} ({etag}:{ekey}): y={s['y']} want {y}")
         if abs(float(s["h"]) - eh) > 0.5:
@@ -428,74 +340,50 @@ def check_stack(label, open_majors, open_subs):
             print("     ", p)
         failures.append(label)
     else:
-        print(f"  [ok] {label}: {len(got)} stacked delegates, "
+        print(f"  [ok] {label}: {len(got)} stacked rows, "
               f"no overlap, no hole (cum height {y})")
 
 
-def qml_headers():
-    """headers() result as plain Python data.
-
-    PySide2 hands JS arrays back as QJSValue instead of converting them;
-    toVariant() turns them into a list of dicts.
-    """
-    v = root.headers()
-    if hasattr(v, "toVariant"):
-        return v.toVariant()
-    return v if v is not None else []
-
-
-def check_headers(label, open_majors, open_subs, check_heights=True):
-    """Assert every section delegate's major/sub rows match the expected fork."""
-    got = qml_headers()
-    want = expected_rows(open_majors, open_subs)
-    if len(got) != len(want):
-        print(f"  [FAIL] {label}: header count got {len(got)}, want {len(want)}")
-        failures.append(f"{label}: header count")
-        return
-    # Index by section key instead of zipping list order: the section
-    # relayout fix (criteria retrigger) recreates section delegates, and the
-    # creation order no longer matches the model order. The assertion is
-    # about each section's forked state, not about list order.
-    got_by_section = {}
-    for h in got:
-        got_by_section[h["section"]] = h
+def check_rows(label, open_majors, open_subs):
+    """Assert every header row's title/badge/height and every row's clip."""
+    got = qml_rows()
     problems = []
-    for w in want:
-        (w_section, mj_t, mj_h, mj_b, mj_v, sb_t, sb_h, sb_b, sb_v) = w
-        h = got_by_section.get(w_section)
-        if h is None:
-            problems.append(f"{w_section}: no section delegate found")
-            continue
-        if h["majorTitle"] != mj_t:
-            problems.append(f"{w_section}: majorTitle={h['majorTitle']!r} want {mj_t!r}")
-        if h["subTitle"] != sb_t:
-            problems.append(f"{w_section}: subTitle={h['subTitle']!r} want {sb_t!r}")
-        if h["majorBadgeVisible"] != mj_v:
-            problems.append(f"{w_section}: majorBadgeVisible={h['majorBadgeVisible']!r} want {mj_v!r}")
-        if h["subBadgeVisible"] != sb_v:
-            problems.append(f"{w_section}: subBadgeVisible={h['subBadgeVisible']!r} want {sb_v!r}")
-        if h["majorBadge"] != mj_b:
-            problems.append(f"{w_section}: majorBadge={h['majorBadge']!r} want {mj_b!r}")
-        if h["subBadge"] != sb_b:
-            problems.append(f"{w_section}: subBadge={h['subBadge']!r} want {sb_b!r}")
-        if check_heights:
-            if abs(float(h["majorHeight"]) - mj_h) > 0.5:
-                problems.append(f"{w_section}: majorHeight={h['majorHeight']!r} want {mj_h}")
-            if abs(float(h["subHeight"]) - sb_h) > 0.5:
-                problems.append(f"{w_section}: subHeight={h['subHeight']!r} want {sb_h}")
-        # 防回归：零高度 delegate 必须靠 clip 保证不画不收（delegate 根的
-        # visible 被 ListView 接管，靠不住），subRow 必须自 clip。
-        if not h["delegateClip"]:
-            problems.append(f"{w_section}: delegate root clip is false")
-        if not h["subClip"]:
-            problems.append(f"{w_section}: subRow.clip is false")
+    seen_sub = set()
+    for s in got:
+        tag = s["tag"]
+        if tag == "MAJOR":
+            m = s["key"]
+            if s["title"] != m:
+                problems.append(f"major {m}: title={s['title']!r}")
+            if s["badge"] != str(major_total(m)):
+                problems.append(f"major {m}: badge={s['badge']!r} want {major_total(m)}")
+            if s["badgeVisible"] != (m not in open_majors):
+                problems.append(f"major {m}: badgeVisible={s['badgeVisible']}")
+            if abs(float(s["h"]) - MAJOR_H[m]) > 0.5:
+                problems.append(f"major {m}: h={s['h']} want {MAJOR_H[m]}")
+        elif tag == "SUB":
+            g = s["key"]
+            seen_sub.add(g)
+            want_h = SUB_RAW + GAP if g.split("/")[0] in open_majors else 0
+            if abs(float(s["h"]) - want_h) > 0.5:
+                problems.append(f"sub {g}: h={s['h']} want {want_h}")
+            if s["title"] != g.split("/", 1)[1]:
+                problems.append(f"sub {g}: title={s['title']!r}")
+            if s["badge"] != str(row_count(g)):
+                problems.append(f"sub {g}: badge={s['badge']!r} want {row_count(g)}")
+            if s["badgeVisible"] != (g not in open_subs):
+                problems.append(f"sub {g}: badgeVisible={s['badgeVisible']}")
+        if not s["clip"]:
+            problems.append(f"{tag}:{s['key']}: clip is false")
+    if seen_sub != set(SUBGROUPS):
+        problems.append(f"sub rows mismatch: got {sorted(seen_sub)}")
     if problems:
         print(f"  [FAIL] {label}")
         for p in problems:
             print("     ", p)
         failures.append(label)
     else:
-        print(f"  [ok] {label}: {len(got)} section delegates match the two-level fork")
+        print(f"  [ok] {label}: {len(got)} rows match titles/badges/heights")
 
 
 def settle(ms=600):
@@ -506,11 +394,38 @@ def settle(ms=600):
     app.exec_()
 
 
+def check_mid_animation(label, open_majors, open_subs):
+    """Sample the stack DURING the height animations (no settle first).
+
+    The positioner must reflow every frame: even mid-animation, cumulative
+    heights must leave no overlap and no hole. Heights are animating, so only
+    the stack invariant (y contiguity) is asserted here, not final values.
+    """
+    got = [s for s in root.midHeights().toVariant()
+           if isinstance(s, dict) and float(s["h"]) > 0.5]
+    got.sort(key=lambda s: float(s["y"]))
+    problems = []
+    y = 0.0
+    for s in got:
+        sy, sh = float(s["y"]), float(s["h"])
+        if abs(sy - y) > 0.5:
+            problems.append(f"hole/overlap at y={sy}, previous stack ends at {y}")
+        y = sy + sh
+    if problems:
+        print(f"  [FAIL] {label}")
+        for s in got:
+            print(f"      y={s['y']} h={s['h']}")
+        for p in problems:
+            print("     ", p)
+        failures.append(label)
+    else:
+        print(f"  [ok] {label}: {len(got)} visible rows contiguous mid-animation")
+
+
 print(f"groups in mock data: {GROUPS}")
-print(f"majors: {MAJORS}")
+print(f"majors (first-seen order): {MAJOR_ORDER}")
 print(f"subgroups: {SUBGROUPS}")
-print(f"major totals (sum of groupCount over the major's sections): "
-      f"{ {m: major_total(m) for m in MAJORS} }")
+print(f"major totals: { {m: major_total(m) for m in MAJORS} }")
 
 # --- default state: everything expanded at both levels ---
 print("\n1. default state")
@@ -519,15 +434,15 @@ for m in MAJORS:
 for g in SUBGROUPS:
     check(f"isExpanded({g})", root.expanded(g), True)
 settle()
-check("ListView row count == mock rows", root.listCount(), len(DATA))
-check_headers("headers, all expanded", set(MAJORS), set(SUBGROUPS))
+check("script rows always exist (fold never destroys rows)",
+      root.listRowCount(), len(DATA))
+check_rows("rows, all expanded", set(MAJORS), set(SUBGROUPS))
 check_h("contentHeight, all expanded", root.listContentHeight(),
         expected_height(set(MAJORS), set(SUBGROUPS)))
 check_stack("stack, all expanded", set(MAJORS), set(SUBGROUPS))
 
 # --- groupCount reaches the model ---
-print("\n2. groupCount via model (full group strings; major totals are "
-      "QML-side sums over a major's sections)")
+print("\n2. groupCount via model")
 for g in GROUPS:
     check(f"groupCount({g})", model.groupCount(g), row_count(g))
 
@@ -542,10 +457,11 @@ for g in SUBGROUPS:
     # The sub keys' map values are untouched: their rows disappear because the
     # major gate closed, not because the subs were collapsed.
     check(f"sub key {g} map value untouched", root.expanded(g), True)
+check_mid_animation("mid-animation, Image collapsing", open_majors, set(SUBGROUPS))
 settle()
 check_h("contentHeight with Image collapsed", root.listContentHeight(),
         expected_height(open_majors, set(SUBGROUPS)))
-check_headers("headers with Image collapsed", open_majors, set(SUBGROUPS))
+check_rows("rows with Image collapsed", open_majors, set(SUBGROUPS))
 check_stack("stack with Image collapsed", open_majors, set(SUBGROUPS))
 root.toggle("Image")
 
@@ -554,11 +470,13 @@ print("\n4. toggleGroup('Image/Edit') collapses one sub only")
 root.toggle("Image/Edit")
 check("isExpanded(Image/Edit)", root.expanded("Image/Edit"), False)
 check("isExpanded(Image) still open", root.expanded("Image"), True)
+check_mid_animation("mid-animation, Image/Edit collapsing",
+                    set(MAJORS), set(SUBGROUPS) - {"Image/Edit"})
 settle()
 open_subs = set(SUBGROUPS) - {"Image/Edit"}
 check_h("contentHeight with Image/Edit collapsed", root.listContentHeight(),
         expected_height(set(MAJORS), open_subs))
-check_headers("headers with Image/Edit collapsed", set(MAJORS), open_subs)
+check_rows("rows with Image/Edit collapsed", set(MAJORS), open_subs)
 check_stack("stack with Image/Edit collapsed", set(MAJORS), open_subs)
 root.toggle("Image/Edit")
 settle()
@@ -605,20 +523,19 @@ for g in SUBGROUPS:
 settle()
 check_h("all subs collapsed, majors open", root.listContentHeight(),
         expected_height(set(MAJORS), set()))
-check_headers("headers, subs collapsed", set(MAJORS), set())
+check_rows("rows, subs collapsed", set(MAJORS), set())
 check_stack("stack, subs collapsed", set(MAJORS), set())
 
 for m in MAJORS:
     root.toggle(m)
 settle()
-# With every major collapsed only the major headers and the footer remain:
-# majors * (34 + 4) + footer 24; zero sub headers are visible.
+# With every major collapsed only the major headers and the footer remain.
 all_collapsed = root.listContentHeight()
 check_h("all majors collapsed (+ subs, which are hidden)",
         all_collapsed, expected_height(set(), set()))
-check_h("  == majors*(34+4) + 0*subHeader + footer(24)",
-        all_collapsed, len(MAJORS) * 38 + 24)
-check_headers("headers, all majors collapsed", set(), set())
+check_h("  == majors*(34[+4]) + 0*subHeader + footer(24)",
+        all_collapsed, sum(MAJOR_H.values()) + FOOTER)
+check_rows("rows, all majors collapsed", set(), set())
 check_stack("stack, all majors collapsed", set(), set())
 
 for g in SUBGROUPS:
@@ -649,13 +566,10 @@ check_h("fully restored", root.listContentHeight(),
         expected_height(set(MAJORS), set(SUBGROUPS)))
 check_stack("stack, fully restored", set(MAJORS), set(SUBGROUPS))
 
-# --- the reported bug: a section delegate's OWN height change must relayout ---
-# Repro: collapse a sub first (its rows are already zero-height), then toggle
-# the major. The major toggle now changes ONLY the section delegate's height
-# (subRow 28->0 behind the clip), so no item height changes at all. Qt 5.15's
-# ListView treats item-height changes as relayout triggers but not section
-# ones, so without the criteria-retrigger fix everything below stayed at its
-# old y (28px hole) and contentHeight stayed stale.
+# --- the previously broken path: sub collapsed first, then the major ---
+# This was the pure section-height path that needed the criteria swap under
+# the ListView implementation. As a plain positioner the reflow is automatic;
+# geometry must be exact after every step with no relayout machinery.
 print("\n9. pure section-height path (sub collapsed first, then the major)")
 root.toggle("Geometry/Format Convert")
 settle()
@@ -664,97 +578,63 @@ check_h("contentHeight, Geometry sub collapsed", root.listContentHeight(),
         expected_height(set(MAJORS), sub_closed_subs))
 check_stack("stack, Geometry sub collapsed", set(MAJORS), sub_closed_subs)
 root.toggle("Geometry")
+check_mid_animation("mid-animation, Geometry major collapsing (pure path)",
+                    set(MAJORS) - {"Geometry"}, sub_closed_subs)
 settle()
 geom_closed_majors = set(MAJORS) - {"Geometry"}
-check_h("contentHeight, Geometry major collapsed (pure section path)",
+check_h("contentHeight, Geometry major collapsed (pure path)",
         root.listContentHeight(),
         expected_height(geom_closed_majors, sub_closed_subs))
-check_stack("stack, Geometry major collapsed (pure section path)",
-        geom_closed_majors, sub_closed_subs)
+check_stack("stack, Geometry major collapsed (pure path)",
+            geom_closed_majors, sub_closed_subs)
 root.toggle("Geometry")
 settle()
-check_h("contentHeight, Geometry re-expanded (pure section path)",
+check_h("contentHeight, Geometry re-expanded (pure path)",
         root.listContentHeight(),
         expected_height(set(MAJORS), sub_closed_subs))
-check_stack("stack, Geometry re-expanded (pure section path)",
-        set(MAJORS), sub_closed_subs)
+check_stack("stack, Geometry re-expanded (pure path)",
+            set(MAJORS), sub_closed_subs)
 root.toggle("Geometry/Format Convert")
 settle()
 check_h("contentHeight, fully restored again", root.listContentHeight(),
         expected_height(set(MAJORS), set(SUBGROUPS)))
 check_stack("stack, fully restored again", set(MAJORS), set(SUBGROUPS))
 
-# --- flicker regression (2026-09-07): the criteria swap must not run on
-# --- paths that have item-height animation.
-# Measured mechanism (instrumented probe, see ScriptOutliner.qml): the swap
-# does NOT recreate section delegates (identity survives, checked below) --
-# it flips every delegate's attached section value through its FirstCharacter
-# form ("Image/Edit" -> "I"), so all section-dependent bindings re-evaluate
-# against the wrong key; the re-evaluation is not fully synchronous and a
-# deferred pass leaks past the swap, replaying the chevron Behavior and
-# flashing the hover fill. toggleGroup() therefore starts the relayout timer
-# ONLY on the pure section path. Assert both halves: no timer trigger (and
-# stable delegate identity) on sub/row paths, exactly one trigger per pure
-# section toggle, and geometry still heals on the skipped paths.
-print("\n10. flicker regression: relayout timer only on the pure section path")
-# The counter is cumulative: sections 5/8 toggle majors whose subs are all
-# collapsed, which IS the pure section path and legitimately fires it.
-base = root.relayouts()
-check("relayout counter tracks (section 5/8 fired it)", base >= 1, True)
-
-root.stashSection("Image/Edit")
+# --- flicker regression: toggles must never recreate rows ---
+# The old ListView implementation needed a criteria swap that replayed icon
+# animations and reset hover; as a positioner there is no such machinery, but
+# the invariant is still what protects against flicker: row QObject identity
+# survives every toggle, and the total row count never changes.
+print("\n10. row identity survives toggles")
+check("stashRow found the row", root.stashRow("D:/GeneralOperations/img.FlipImage_Horizontal.py"), True)
 root.toggle("Image/Edit")
 settle()
-check("sub toggle: no relayout timer trigger", root.relayouts(), base)
-check("sub toggle: section delegate identity preserved", root.sectionSame(), True)
+check("sub toggle: script row identity preserved", root.rowSame(), True)
+check("sub toggle: script row count unchanged", root.listRowCount(), len(DATA))
 root.toggle("Image/Edit")
 settle()
-check("sub toggle back: section delegate identity preserved", root.sectionSame(), True)
-
-root.toggle("System")
-settle()
-check("major without subgroups (System): no relayout timer trigger",
-      root.relayouts(), base)
-root.toggle("System")
-settle()
-check("System back: no relayout timer trigger", root.relayouts(), base)
-
-root.stashSection("Image/Edit")
+check("sub toggle back: row identity preserved", root.rowSame(), True)
 root.toggle("Image")
 settle()
-check("major toggle with an open sub: no relayout timer trigger",
-      root.relayouts(), base)
-check("major toggle with an open sub: section delegate identity preserved",
-      root.sectionSame(), True)
-# The core of acceptance criterion 2: with the relayouter skipped, the item
-# rows' height animation must alone have healed the section layout below the
-# toggled major (no overlap, no hole).
-check_stack("stack, major toggle w/o relayouter (item animation self-heals)",
-            set(MAJORS) - {"Image"}, set(SUBGROUPS))
+check("major toggle: row identity preserved", root.rowSame(), True)
+check("major toggle: script row count unchanged", root.listRowCount(), len(DATA))
 root.toggle("Image")
 settle()
-check("major toggle back: still no relayout timer trigger",
-      root.relayouts(), base)
-check_stack("stack restored, major toggle w/o relayouter",
-            set(MAJORS), set(SUBGROUPS))
 
-# Pure section path: the timer must still fire (once per toggle) and the
-# stack must still heal -- same sequence as section 9, now also counting.
-root.toggle("Geometry/Format Convert")
+# --- layoutStore restore path: whole-map assignment drives the fold ---
+print("\n11. setExpanded (restore from layout.json semantics)")
+root.setExpanded({"Image": False})
+check("isExpanded(Image) after setExpanded", root.expanded("Image"), False)
 settle()
-root.toggle("Geometry")
+restored_majors = set(MAJORS) - {"Image"}
+check_h("contentHeight after setExpanded", root.listContentHeight(),
+        expected_height(restored_majors, set(SUBGROUPS)))
+check_stack("stack after setExpanded", restored_majors, set(SUBGROUPS))
+root.setExpanded({})
 settle()
-check("pure section path: relayout timer fired once", root.relayouts(), base + 1)
-check_stack("stack, pure section path w/ relayouter",
-            set(MAJORS) - {"Geometry"},
-            set(SUBGROUPS) - {"Geometry/Format Convert"})
-root.toggle("Geometry")
-settle()
-root.toggle("Geometry/Format Convert")
-settle()
-check("pure section path re-expand: relayout timer fired once more",
-      root.relayouts(), base + 2)
-check_stack("stack, fully restored yet again", set(MAJORS), set(SUBGROUPS))
+check_h("contentHeight after reset", root.listContentHeight(),
+        expected_height(set(MAJORS), set(SUBGROUPS)))
+check_stack("stack after reset", set(MAJORS), set(SUBGROUPS))
 
 print()
 if warnings:
