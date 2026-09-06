@@ -153,6 +153,66 @@ Item {
     property var _stashed: null
     function stash()        { _stashed = ol.expandedGroups; }
     function isSameObject() { return _stashed === ol.expandedGroups; }
+
+    // ---- section delegate identity probe (flicker regression, 2026-09-07) ----
+    // Stash the QObject of one section delegate and later report whether a
+    // live delegate with the same section IS that object. Touching a stashed
+    // wrapper of a destroyed delegate throws, which itself proves recreation
+    // -- both paths return false.
+    property var _stashedSec: null
+    function findSection(key) {
+        var l = findList();
+        if (!l || !l.contentItem)
+            return null;
+        var items = l.contentItem.children;
+        for (var i = 0; i < items.length; ++i)
+            if (items[i].objectName === "sectionHeader"
+                    && items[i].headerSection === key)
+                return items[i];
+        return null;
+    }
+    function stashSection(key) { _stashedSec = findSection(key); return _stashedSec !== null; }
+    function sectionSame() {
+        if (_stashedSec === null)
+            return false;
+        var cur = null;
+        var l = findList();
+        if (l && l.contentItem) {
+            var items = l.contentItem.children;
+            for (var i = 0; i < items.length; ++i) {
+                if (items[i].objectName !== "sectionHeader")
+                    continue;
+                try {
+                    if (items[i].headerSection === _stashedSec.headerSection)
+                        cur = items[i];
+                } catch (e) {
+                    return false;
+                }
+            }
+        }
+        return cur === _stashedSec;
+    }
+
+    // ---- sectionRelayoutTimer trigger counter (flicker regression) ----
+    // The criteria swap makes every section delegate's attached section value
+    // flip through its FirstCharacter form ("Image/Edit" -> "I") and back;
+    // bindings re-evaluate against the wrong section, and the re-evaluation
+    // is not fully synchronous -- deferred passes leak past the swap and
+    // start Behaviors (chevron rotation replay) plus recompute hover
+    // geometry (hover fill flashes). toggleGroup() must therefore fire the
+    // timer ONLY on the pure section path (no item-height animation). The
+    // timer carries objectName "sectionRelayoutTimer"; count its triggered()
+    // signals here. The Timer lives among the outliner's non-visual
+    // resources, not its visual children.
+    property int relayoutCount: 0
+    Component.onCompleted: {
+        for (var i = 0; i < ol.resources.length; ++i) {
+            var r = ol.resources[i];
+            if (r && r.objectName === "sectionRelayoutTimer")
+                r.triggered.connect(function() { ++relayoutCount; });
+        }
+    }
+    function relayouts() { return relayoutCount; }
 }
 """
 # Written next to the real QML: implicit directory imports (finding
@@ -623,6 +683,78 @@ settle()
 check_h("contentHeight, fully restored again", root.listContentHeight(),
         expected_height(set(MAJORS), set(SUBGROUPS)))
 check_stack("stack, fully restored again", set(MAJORS), set(SUBGROUPS))
+
+# --- flicker regression (2026-09-07): the criteria swap must not run on
+# --- paths that have item-height animation.
+# Measured mechanism (instrumented probe, see ScriptOutliner.qml): the swap
+# does NOT recreate section delegates (identity survives, checked below) --
+# it flips every delegate's attached section value through its FirstCharacter
+# form ("Image/Edit" -> "I"), so all section-dependent bindings re-evaluate
+# against the wrong key; the re-evaluation is not fully synchronous and a
+# deferred pass leaks past the swap, replaying the chevron Behavior and
+# flashing the hover fill. toggleGroup() therefore starts the relayout timer
+# ONLY on the pure section path. Assert both halves: no timer trigger (and
+# stable delegate identity) on sub/row paths, exactly one trigger per pure
+# section toggle, and geometry still heals on the skipped paths.
+print("\n10. flicker regression: relayout timer only on the pure section path")
+# The counter is cumulative: sections 5/8 toggle majors whose subs are all
+# collapsed, which IS the pure section path and legitimately fires it.
+base = root.relayouts()
+check("relayout counter tracks (section 5/8 fired it)", base >= 1, True)
+
+root.stashSection("Image/Edit")
+root.toggle("Image/Edit")
+settle()
+check("sub toggle: no relayout timer trigger", root.relayouts(), base)
+check("sub toggle: section delegate identity preserved", root.sectionSame(), True)
+root.toggle("Image/Edit")
+settle()
+check("sub toggle back: section delegate identity preserved", root.sectionSame(), True)
+
+root.toggle("System")
+settle()
+check("major without subgroups (System): no relayout timer trigger",
+      root.relayouts(), base)
+root.toggle("System")
+settle()
+check("System back: no relayout timer trigger", root.relayouts(), base)
+
+root.stashSection("Image/Edit")
+root.toggle("Image")
+settle()
+check("major toggle with an open sub: no relayout timer trigger",
+      root.relayouts(), base)
+check("major toggle with an open sub: section delegate identity preserved",
+      root.sectionSame(), True)
+# The core of acceptance criterion 2: with the relayouter skipped, the item
+# rows' height animation must alone have healed the section layout below the
+# toggled major (no overlap, no hole).
+check_stack("stack, major toggle w/o relayouter (item animation self-heals)",
+            set(MAJORS) - {"Image"}, set(SUBGROUPS))
+root.toggle("Image")
+settle()
+check("major toggle back: still no relayout timer trigger",
+      root.relayouts(), base)
+check_stack("stack restored, major toggle w/o relayouter",
+            set(MAJORS), set(SUBGROUPS))
+
+# Pure section path: the timer must still fire (once per toggle) and the
+# stack must still heal -- same sequence as section 9, now also counting.
+root.toggle("Geometry/Format Convert")
+settle()
+root.toggle("Geometry")
+settle()
+check("pure section path: relayout timer fired once", root.relayouts(), base + 1)
+check_stack("stack, pure section path w/ relayouter",
+            set(MAJORS) - {"Geometry"},
+            set(SUBGROUPS) - {"Geometry/Format Convert"})
+root.toggle("Geometry")
+settle()
+root.toggle("Geometry/Format Convert")
+settle()
+check("pure section path re-expand: relayout timer fired once more",
+      root.relayouts(), base + 2)
+check_stack("stack, fully restored yet again", set(MAJORS), set(SUBGROUPS))
 
 print()
 if warnings:

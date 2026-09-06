@@ -85,11 +85,40 @@ Item {
         expandedGroups = next;
         // 折叠会改变 section delegate 的高度，而 Qt 5.15 的 ListView 对
         // section delegate 高度变化不重排（详见下方 sectionRelayoutTimer
-        // 注释），等高度动画结束后重触发一次 section 布局。
-        sectionRelayoutTimer.restart();
+        // 注释）。但重排器的 criteria 换切有可感知的闪烁代价（同见下），
+        // 只在"没有任何脚本行高度动画能顺带完成重排"的纯 section 路径
+        // 启动；判定用 toggle 之后的折叠状态 next。
+        if (needsSectionRelayout(key, next))
+            sectionRelayoutTimer.restart();
     }
 
-    // ---- 折叠后的 section 重排器 ----
+    /// toggleGroup 的判定：这次切换是否必须靠 criteria 换切重排 section。
+    /// 有脚本行参与动画（item delegate 高度逐帧变化），ListView 每帧都会
+    /// 自排、section 位置随之自愈 —— 换切纯属多余，只贡献闪烁。
+    ///   - 子分类切换（key 含 "/"）：其脚本行 0<->32px 动画逐帧重排；
+    ///     所属大类若本就收起，则什么都没动，同样无需重排。
+    ///   - 大类切换：任一子分类展开 → 其脚本行在动画；大类自己有根级
+    ///     脚本（sectionTree 里存在与 key 同名的 section，如 System）→
+    ///     那些行的可见性随大类 key 翻转、高度在动画。
+    ///   - 大类下所有子分类都收起且无根级脚本 → 屏幕上没有任何 item
+    ///     动画（v0.2.004 修 28px 空洞的那条路径）→ 唯一需要换切的场景。
+    function needsSectionRelayout(key, state) {
+        if (key.indexOf("/") >= 0)
+            return false;
+        var info = sectionTree[key];
+        if (info === undefined)
+            return false;
+        var sections = info.sections;
+        for (var i = 0; i < sections.length; ++i) {
+            if (sections[i] === key)
+                return false;
+            if (state[sections[i]] !== false)
+                return false;
+        }
+        return true;
+    }
+
+    // ---- 折叠后的 section 重排器（仅纯 section 路径，见 toggleGroup）----
     // 【为什么需要】Qt 5.15 的 ListView 只把 item delegate 的高度变化当作
     // 重排触发器。section delegate 自身高度变化（折叠大类时 subRow 28→0
     // 带动整体 66→38）既不重排后面的 section/item，也不重算
@@ -109,12 +138,28 @@ Item {
     // 【采用】动画窗口结束（durFast=150ms + 余量）后把 section.criteria
     // 换成 FirstCharacter 再立即换回 FullString：逼 ListView 作废全部
     // section 状态、按当前 delegate 高度重建布局。两次赋值在同一个
-    // JS 调用里完成，中间不产生帧，重建过程不可见。折叠动画本身
-    // 完整保留；唯一代价是纯 section 路径下方内容在动画结束的那一帧
-    // 一次到位（而不是跟着 150ms 逐帧走）—— 压力探针 11 个折叠序列
-    // 全部几何断言通过。
+    // JS 调用里完成，中间不产生帧；折叠动画本身完整保留。
+    //
+    // 【换切的闪烁代价 —— 2026-09-07 探针实测，因此只在纯 section 路径
+    // 启动】最初的假设是"换切销毁重建所有 section delegate，悬停/箭头
+    // 状态复位所以闪"，实测不成立：换切前后 section delegate 的 QObject
+    // 身份不变（identity 探针，换切后 settle 依然同一实例）。真正的机制
+    // 是：换切会把每个 section delegate 的 attached section 值短暂换成
+    // FirstCharacter 值（"Image/Edit" → "I"），delegate 内部所有依赖
+    // section 的绑定（major / hasSub / subExpanded / majorInfo…）都按
+    // 错误的 section 重新求值；而且 ListView 的 section 重算并不完全
+    // 同步 —— 探针日志里，收起 Image/Edit 后换切，"SWAP end" 之后仍
+    // 打出 subExpanded→true、箭头 rotation 0→90 的 Behavior 动画（该子
+    // 分类明明刚收起）。可见后果正是用户报告的两类闪烁：悬停填充先
+    // 变透明再回来（"I" 态下 hasSub 短暂为假、悬停中的 subRow 消失、
+    // 命中测试重算），箭头图标重放转动动画（错误的 subExpanded 触发
+    // 一次 Behavior）。所以这条重排路径只在纯 section 路径上走：那条
+    // 路径上可见的只有已收起的行头，错误 section 的瞬态重估画不出来；
+    // 其余路径的重排交给脚本行高度动画逐帧自愈。objectName 供
+    // behaviour.py 监听 triggered 计数，断言行动画路径不再触发换切。
     Timer {
         id: sectionRelayoutTimer
+        objectName: "sectionRelayoutTimer"
         interval: Theme.durFast + 40
         onTriggered: {
             listView.section.criteria = ViewSection.FirstCharacter;

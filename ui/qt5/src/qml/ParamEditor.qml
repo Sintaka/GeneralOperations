@@ -305,7 +305,10 @@ Item {
                         integer: paramItem.type === "int"
                         Component.onCompleted: {
                             var v = root.values[paramItem.name];
-                            if (v !== undefined)
+                            // str/bool 参数的滑块不可见但这里照常执行，
+                            // 它们的默认值（""、false）塞进 value 会刷
+                            // "Cannot assign QString to double"。
+                            if (v !== undefined && paramItem.isNumeric)
                                 value = paramItem.snapToLadder
                                     ? root.ladderIndex(paramItem.ladder, v) : v;
                             paramItem.sliderReady = true;

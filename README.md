@@ -8,6 +8,8 @@ Python，Python 环境由启动器托管，不碰系统 Python。
 
 [![ghfind card](https://ghfind.com/api/card/sintaka?theme=light&variant=work&qr=1)](https://ghfind.com/u/sintaka)
 
+![主界面：左侧脚本 Outliner，右侧参数面板](screenshot.png)
+
 ## 血统
 
 三代仓库，一条主线：把散装脚本收口成一个启动器（完整决策与脚本映射见
