@@ -7,6 +7,8 @@
 //   右上角圆形按钮  → WindowControls.qml（抄鹰角启动器）
 //   四边缩放热区    → WindowResizer.qml
 //   整窗拖拽        → 本文件的 rootDrag MouseArea
+// 最小化/还原不走原生瞬间切换：WindowControls 只发请求信号，这里先播
+// rootItem 的内容收起/展开动画（Windows 观感），见"最小化 / 还原动画"。
 
 import QtQuick 2.15
 import QtQuick.Window 2.15
@@ -26,6 +28,82 @@ Window {
     readonly property int margin: 18
     readonly property int gap: 14
     readonly property int leftWidth: 260
+
+    // ---- 最小化 / 还原动画（Windows 风格的简单缩放）----
+    // 原生窗口最小化/还原是瞬间消失/出现；这里补一个贴近 Windows 观感的
+    // 内容收起/展开：rootItem 以底部中心为原点 scale 1→0.9、opacity 1→0，
+    // 走 Animator（渲染线程），时长/easing 复用 Theme.durFast/Theme.easing。
+    //
+    // 时序约定：
+    //   收起  = 收起动画播完（onStopped）才真正 showMinimized()。
+    //   还原  = 任何进入 Minimized 的时刻把内容置为收起态（此刻窗口不可见，
+    //           赋值不产生可见帧；UI 按钮路径下动画本来就停在收起态，赋值
+    //           是幂等的；任务栏/Win+D 路径下内容还停在正常态，趁不可见先
+    //           收起，还原动画才有正确起点），回到 Windowed 再播展开动画
+    //           ——还原的第一帧就是收起态，不会闪一帧全尺寸。
+    //   防重入 = 收起/展开进行中再点最小化直接忽略（requestMinimize）。
+    //   首启豁免 = minimizeArmed 只在真的进过一次 Minimized 后置位，
+    //           启动时 visibility 变成 Windowed 不会触发任何动画。
+    // 显式动画而不是 Behavior：只在最小化/还原时按需触发，不劫持程序性
+    // 的 scale/opacity 赋值。动画对象声明为单例复用，不每次 new。
+    readonly property real collapseScale: 0.9
+    property bool minimizeArmed: false
+
+    function requestMinimize() {
+        if (collapseScaleAnim.running || restoreScaleAnim.running)
+            return;
+        collapseOpacityAnim.start();
+        collapseScaleAnim.start();   // stopped 回调负责真正 showMinimized
+    }
+
+    onVisibilityChanged: {
+        if (visibility === Window.Minimized) {
+            rootItem.scale = collapseScale
+            rootItem.opacity = 0.0
+            minimizeArmed = true
+        } else if (minimizeArmed && visibility === Window.Windowed) {
+            minimizeArmed = false
+            restoreOpacityAnim.start()
+            restoreScaleAnim.start()
+        }
+    }
+
+    ScaleAnimator {
+        id: collapseScaleAnim
+        target: rootItem
+        from: 1.0
+        to: win.collapseScale
+        duration: Theme.durFast
+        easing.type: Theme.easing
+        onStopped: win.showMinimized()
+    }
+
+    OpacityAnimator {
+        id: collapseOpacityAnim
+        target: rootItem
+        from: 1.0
+        to: 0.0
+        duration: Theme.durFast
+        easing.type: Theme.easing
+    }
+
+    ScaleAnimator {
+        id: restoreScaleAnim
+        target: rootItem
+        from: win.collapseScale
+        to: 1.0
+        duration: Theme.durFast
+        easing.type: Theme.easing
+    }
+
+    OpacityAnimator {
+        id: restoreOpacityAnim
+        target: rootItem
+        from: 0.0
+        to: 1.0
+        duration: Theme.durFast
+        easing.type: Theme.easing
+    }
 
     // 命令行直跑（调试入口）：launcher.exe <脚本> <文件...>。
     // 选中脚本后立刻按"面板当前参数"执行 —— selectedInfo 的赋值会同步
@@ -51,6 +129,8 @@ Window {
     Item {
         id: rootItem
         anchors.fill: parent
+        // 收起动画的缩放原点（scale 恒为 1 时无任何视觉影响）。
+        transformOrigin: Item.Bottom
 
         // ---- 整窗拖拽 ----
         // 无边框后没有标题栏可抓。这个 MouseArea 声明在最前面（z 最低），
@@ -79,6 +159,14 @@ Window {
             live: false
             hideSource: false
             visible: false
+            // 【半分辨率 + 量化】resize 时本 item 尺寸逐帧跟着变，若纹理
+            // 尺寸 = item 尺寸，整窗 FBO 就逐帧重分配。textureSize 锁半分辨率
+            // （对齐 8px，GlassPanel.slice 同思路）：背景只有渐变 + 一张等比
+            // 缩放的光斑纹理，没有高频内容，两块面板取样后还要过 20px 模糊
+            // ——半分辨率无感，重分配从每帧变偶发。
+            textureSize: Qt.size(
+                Math.max(1, Math.round(rootItem.width / 16) * 8),
+                Math.max(1, Math.round(rootItem.height / 16) * 8))
         }
 
         GlassPanel {
@@ -273,6 +361,9 @@ Window {
             anchors.topMargin: winControls.floatOffset
             anchors.rightMargin: winControls.floatOffset
             target: win
+            // 最小化只发请求：真正的 showMinimized 要等收起动画播完
+            // （见文件顶部"最小化 / 还原动画"的时序约定）。
+            onMinimizeRequested: requestMinimize()
         }
 
         // ==== 拖放诊断模式（--dropdebug）====

@@ -190,8 +190,12 @@ QtObject {
     // dsh 原注释：
     //   "Tree rows: project 34px, session 32px, radius 8, indent step 22px
     //    (16px slot + 6px gap)."
-    readonly property int rowGroupHeight: 34   ///< 分组头
+    readonly property int rowGroupHeight: 34   ///< 大类分组头
     readonly property int rowItemHeight:  32   ///< 脚本行
+    /// 子分类头。本仓库新定值，dsh 没有这个层级 —— 比大类头矮一档、比脚本行
+    /// 高半档，缩进对齐到脚本行的图标槽（rowPadding + iconSlot + iconGap），
+    /// 与 rowItemHeight 共用同一套缩进节奏。
+    readonly property int rowSubGroupHeight: 28
     readonly property int rowGap:         2    ///< 行间距 (.sessionRow margin-top)
     readonly property int groupGap:       4    ///< 组间距 (.groupSection + .groupSection)
     readonly property int rowPadding:     8    ///< 行左右内边距

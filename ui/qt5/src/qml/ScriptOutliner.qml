@@ -1,21 +1,49 @@
-// 脚本 Outliner：左侧面板里的可折叠脚本树。
+// 脚本 Outliner：左侧面板里的两级可折叠脚本树（大类 / 子分类 / 脚本行）。
 //
 // 【结构照 dsh (deepseek-harness) 的 WorkspaceBrowser】
-// 分组头 34px 可点击折叠，脚本行 32px，8px 圆角，行间距 2px，组间距 4px，
+// 大类头 34px 可点击折叠，脚本行 32px，8px 圆角，行间距 2px，组间距 4px，
 // 悬停与选中共用同一个填充色，行尾操作图标只在悬停时出现，
 // 折叠箭头 150ms 旋转，行展开时 150ms 淡入。
+// 子分类头 28px 是本仓库在 dsh 之上新增的层级（Theme.rowSubGroupHeight），
+// 刻意比大类头弱一档：不加粗、次级文字色、缩进对齐脚本行的图标槽。
 // 配色走鹰角（见 Theme.qml），所以这里不写死任何颜色/时长/圆角。
 //
-// 【折叠是怎么做的，以及为什么这么做】
+// 【两级树是怎么做的 —— 两级头从同一个 section delegate 里分叉】
 // 模型 (ScriptListModel) 是扁平的 QAbstractListModel，只有一个 group role，
-// 分组靠 ListView.section 呈现 —— 模型里没有"分组头"这种假行。
-// 要折叠就得让某些行不占位，做法是把 delegate 的 height 设为 0 且 visible
-// 设为 false，而不是改模型。
+// group 是脚本的目录路径（"Image/Edit"、"System"……），模型里没有
+// "分组头"这种假行。分组靠 ListView.section（"group" + FullString）呈现：
+// 每个唯一的 group 串一个 section delegate。于是约定：
+//   大类   = group 第一段（"/" 之前），如 "Image"；
+//   子分类 = 第二段，如 "Edit"；
+//   不含 "/" 的 group（根目录脚本，"System"）本身就是大类，没有子分类层。
 //
-// 这样选的原因：折叠是纯视觉状态，不是数据。放进 C++ 模型意味着
-// 每次展开/收起都要 beginRemoveRows/endInsertRows，模型要额外维护
-// "可见行 → 真实行"的映射，而 QML 侧只是想少画几行而已。
-// 状态留在 QML 里，C++ 侧一行不用改。
+// 一个 section delegate 渲染 1~2 行（Column 布局）：
+//   - 大类头行（34px，加粗，folder/chevron 悬停互换）：只由该大类的【第一个】
+//     section 承担（"大类 carrier"）；
+//   - 子分类头行（28px，常驻小箭头，可整行点击）：凡是含 "/" 的 group 都渲染
+//     自己这一行。于是第一个 section 的 delegate 同时给出大类头 + 它自己的
+//     子分类头 —— Image/Edit 槽位上先画 "Image" 再画 "Edit"，
+//     大类下的三个子分类（Edit / Format Convert / ReSize）一个不缺。
+// 分叉依据是"前面有没有同大类的 section"。Qt 6 有 ViewSection.previousSections
+// /nextSections 可以直接回答，Qt 5.15 没有 —— 实测 5.15.2 的 section delegate
+// 上 ViewSection.* 一律 undefined，attached 对象上只有 section /
+// previousSection / nextSection，且在 section delegate 上三者恒为空串
+// （previousSection 只在 item delegate 上有值，帮不上忙）。
+// 所以 root 上放了一个零尺寸 Repeater 探针把模型的行序走一遍，自己推导出
+// sectionTree（每个大类：有序 section 列表 + 脚本总数），见下方注释。
+// 模型行序即 section 序：ScriptRegistry 已按相对路径字典序排序，
+// 同组连续、同大类连续；行序去重后与 ListView 实际生成的 section 序一致。
+//
+// 【折叠状态与 key 语义】
+// expandedGroups 的 key 有两种：大类用第一段字符串（如 "Image"），子分类用
+// 完整 group 串（如 "Image/Edit"）。大类 key 不含 "/"，与子分类 key 不会撞；
+// 对不含 "/" 的组（"System"）两者天然是同一个 key，点一下即折整个组。
+// 脚本行可见 = 大类展开 && 所属子分类（完整 group）展开。
+//
+// 【为什么折叠不动模型】
+// 折叠是纯视觉状态，不是数据。放进 C++ 模型意味着每次展开/收起都要
+// beginRemoveRows/endInsertRows，模型要额外维护"可见行 → 真实行"的映射，
+// 而 QML 侧只是想少画几行而已。状态留在 QML 里，C++ 侧一行不用改。
 //
 // 代价是被折叠的 delegate 仍然存在（只是零高度），所以行数极多时
 // 省不掉 delegate 的创建成本。脚本总量是十几个量级，无所谓。
@@ -36,7 +64,8 @@ Item {
     property string hoverDesc: ""
 
     // ---- 折叠状态 ----
-    // key = 分组名，value = 是否展开。缺省视为展开。
+    // key = 大类名（第一段）或完整子分类 group 串，value = 是否展开。
+    // 缺省视为展开。语义见文件头【折叠状态与 key 语义】。
     //
     // 【为什么要整体重新赋值】QML 的属性绑定只在属性本身变化时重新求值。
     // 对 var 里的 JS 对象做 obj[k] = v 是原地修改，属性引用没变，
@@ -44,16 +73,76 @@ Item {
     // 所以 toggle 里必须构造一个新对象再整体赋回去。
     property var expandedGroups: ({})
 
-    function isExpanded(group) {
-        return expandedGroups[group] !== false;
+    function isExpanded(key) {
+        return expandedGroups[key] !== false;
     }
 
-    function toggleGroup(group) {
+    function toggleGroup(key) {
         var next = {};
         for (var k in expandedGroups)
             next[k] = expandedGroups[k];
-        next[group] = !isExpanded(group);
+        next[key] = !isExpanded(key);
         expandedGroups = next;
+    }
+
+    /// group 的第一段（"/" 之前）；不含 "/" 时就是 group 本身。
+    /// 这就是 expandedGroups 里的"大类 key"，也是大类头的显示文本。
+    function groupMajor(group) {
+        var i = group.indexOf("/");
+        return i >= 0 ? group.substring(0, i) : group;
+    }
+
+    // ---- section 结构探针 ----
+    // Qt 5.15 的 section delegate 只拿得到当前 section 字符串，拿不到
+    // "前面还有哪些 section"（见文件头）。这里用 Repeater 把模型的每一行
+    // 过一遍、只读 group role，行序去重即 section 序。delegate 是零尺寸
+    // 不可见 Item，不参与布局；行数十几个量级，开销可忽略。
+    Repeater {
+        id: groupProbe
+
+        model: root.model
+
+        delegate: Item {
+            width: 0
+            height: 0
+            visible: false
+
+            readonly property string probeGroup: model.group !== undefined ? model.group : ""
+        }
+    }
+
+    // 行序 → section 树：major -> { total, sections }。
+    //   sections = 该大类下的 section 串（行序去重后的出现顺序）；
+    //   total    = 对这些 section 逐个求 groupCount 之和（大类折叠徽标
+    //              要显示的总数，等价于"自身 + 前后同大类 section"求和）。
+    // 依赖两处：groupProbe.count（行数变化时重算）、root.model.count
+    // （reload 时行数可能不变但分组变了，靠 load() 每次扫描后 emit 的
+    // countChanged 触发重算 —— 与文件末尾 errorFooter 同一套做法）。
+    readonly property var sectionTree: {
+        var tree = {};
+        if (!root.model || !root.model.groupCount)
+            return tree;
+        var sections = [];
+        var seen = {};
+        var n = groupProbe.count;
+        for (var i = 0; i < n; ++i) {
+            var obj = groupProbe.itemAt(i);
+            var g = obj ? obj.probeGroup : "";
+            if (g === "" || seen[g])
+                continue;
+            seen[g] = true;
+            sections.push(g);
+        }
+        var _dep = root.model.count; // 建立依赖，本身不使用
+        for (i = 0; i < sections.length; ++i) {
+            var s = sections[i];
+            var m = root.groupMajor(s);
+            if (!tree[m])
+                tree[m] = { total: 0, sections: [] };
+            tree[m].sections.push(s);
+            tree[m].total += root.model.groupCount(s);
+        }
+        return tree;
     }
 
     ListView {
@@ -92,100 +181,225 @@ Item {
         footer: Item { width: 1; height: Theme.fadeHeight }
     }
 
-    // ==== 分组头 ====
+    // ==== 分组头（大类头行 + 子分类头行，见文件头）====
     Component {
         id: sectionDelegate
 
         Item {
             id: sectionRoot
             width: listView.width
-            // 组间距：靠分组头自己的上边距实现，不用 spacing ——
+
+            // ---- 测试锚点：behaviour.py 据此断言两行的标题/徽标/高度 ----
+            objectName: "sectionHeader"
+            readonly property string headerSection: section
+            readonly property string majorRowTitle: majorRow.visible ? major : ""
+            readonly property real majorRowHeight: majorRow.visible ? majorRow.height : 0
+            readonly property string majorRowBadge: majorRow.visible ? majorCount.text : ""
+            readonly property bool majorRowBadgeVisible: majorRow.visible && majorCount.visible
+            readonly property string subRowTitle: subRow.visible ? subLabel : ""
+            readonly property real subRowHeight: subRow.visible ? subRow.height : 0
+            readonly property string subRowBadge: subRow.visible ? subCount.text : ""
+            readonly property bool subRowBadgeVisible: subRow.visible && subCount.visible
+
+            // ---- 本 delegate 承担哪几行 ----
+            readonly property string major: root.groupMajor(section)
+            readonly property bool hasSub: section.indexOf("/") >= 0
+            readonly property string subLabel: hasSub ? section.substring(section.indexOf("/") + 1) : ""
+            // 本大类的 sectionTree 条目；查不到时按"大类 carrier"兜底 ——
+            // 宁可重复画大类头，也不能把整个大类藏没了。
+            readonly property var majorInfo: root.sectionTree[major]
+            // 大类 carrier：该大类的第一个 section。只有它渲染大类头行。
+            readonly property bool isMajorCarrier: majorInfo === undefined
+                || majorInfo.sections.length === 0 || majorInfo.sections[0] === section
+
+            readonly property bool majorExpanded: root.isExpanded(major)
+            readonly property bool subExpanded: root.isExpanded(section)
+
+            // 组间距：靠分组头自己的底部留白实现，不用 spacing ——
             // ListView 的 spacing 会同时作用于普通行，那样行间距就不是 2px 了。
-            height: Theme.rowGroupHeight + Theme.groupGap
+            // 两行全为零时 delegate 必须真正归零（子分类头随大类收起、非
+            // carrier 的子分类 delegate），否则收起的大类会留下 4px 空隙。
+            height: {
+                var rows = (majorRow.visible ? majorRow.height : 0)
+                    + (subRow.visible ? subRow.height : 0);
+                return rows > 0 ? rows + Theme.groupGap : 0;
+            }
+            // 高度动画到 0 的过程中内容会溢出到相邻行上面，clip 是必须的。
+            clip: true
 
-            readonly property bool expanded: root.isExpanded(section)
-
-            Rectangle {
-                id: sectionBg
+            Column {
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: Theme.rowGroupHeight
-                radius: Theme.radius
-                color: sectionMouse.containsMouse ? Theme.fillHover : "transparent"
 
-                Behavior on color {
-                    ColorAnimation { duration: Theme.durFast; easing.type: Theme.easing }
-                }
+                // ---- 大类头行 ----
+                // 只有 carrier 渲染。高度恒定，carrier 身份只在模型 reload
+                // 时才会变（delegate 随之重建），不需要动画。
+                Rectangle {
+                    id: majorRow
+                    visible: sectionRoot.isMajorCarrier
+                    width: parent.width
+                    height: Theme.rowGroupHeight
+                    radius: Theme.radius
+                    color: majorMouse.containsMouse ? Theme.fillHover : "transparent"
 
-                // ---- 图标槽 ----
-                // dsh 的行为：默认显示文件夹，悬停时换成折叠箭头。
-                // 两个图标占同一个 16px 槽，靠 visible 互斥切换。
-                Item {
-                    id: sectionIcon
-                    width: Theme.iconSlot
-                    height: Theme.iconSlot
-                    anchors.left: parent.left
-                    anchors.leftMargin: Theme.rowPadding
-                    anchors.verticalCenter: parent.verticalCenter
-
-                    Glyph {
-                        anchors.fill: parent
-                        kind: Glyph.Kind.Folder
-                        color: Theme.textTertiary
-                        visible: !sectionMouse.containsMouse
+                    Behavior on color {
+                        ColorAnimation { duration: Theme.durFast; easing.type: Theme.easing }
                     }
 
-                    Glyph {
-                        anchors.fill: parent
-                        kind: Glyph.Kind.Chevron
-                        color: Theme.textSecondary
-                        visible: sectionMouse.containsMouse
-                        // 展开时箭头指下。dsh 是 rotate(90deg) 配 150ms。
-                        rotation: sectionRoot.expanded ? 90 : 0
-                        Behavior on rotation {
-                            NumberAnimation { duration: Theme.durFast; easing.type: Theme.easing }
+                    // ---- 图标槽 ----
+                    // dsh 的行为：默认显示文件夹，悬停时换成折叠箭头。
+                    // 两个图标占同一个 16px 槽，靠 visible 互斥切换。
+                    Item {
+                        id: sectionIcon
+                        width: Theme.iconSlot
+                        height: Theme.iconSlot
+                        anchors.left: parent.left
+                        anchors.leftMargin: Theme.rowPadding
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        Glyph {
+                            anchors.fill: parent
+                            kind: Glyph.Kind.Folder
+                            color: Theme.textTertiary
+                            visible: !majorMouse.containsMouse
+                        }
+
+                        Glyph {
+                            anchors.fill: parent
+                            kind: Glyph.Kind.Chevron
+                            color: Theme.textSecondary
+                            visible: majorMouse.containsMouse
+                            // 展开时箭头指下。dsh 是 rotate(90deg) 配 150ms。
+                            rotation: sectionRoot.majorExpanded ? 90 : 0
+                            Behavior on rotation {
+                                NumberAnimation { duration: Theme.durFast; easing.type: Theme.easing }
+                            }
                         }
                     }
+
+                    Text {
+                        anchors.left: sectionIcon.right
+                        anchors.leftMargin: Theme.iconGap
+                        anchors.right: majorCount.left
+                        anchors.rightMargin: Theme.iconGap
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: sectionRoot.major
+                        color: Theme.textPrimary
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontBody
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+
+                    // 折叠后看不见成员，给个数量提示：该大类所有 section 的
+                    // groupCount 之和（sectionTree 已算好，reload 依赖也在
+                    // 那里建立）。
+                    Text {
+                        id: majorCount
+                        anchors.right: parent.right
+                        anchors.rightMargin: Theme.rowPadding
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: sectionRoot.majorInfo !== undefined ? sectionRoot.majorInfo.total : 0
+                        color: Theme.textTertiary
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontMicro
+                        visible: !sectionRoot.majorExpanded
+                    }
+
+                    MouseArea {
+                        id: majorMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        // 大类头折整个大类（key = 第一段）。
+                        onClicked: root.toggleGroup(sectionRoot.major)
+                    }
                 }
 
-                Text {
-                    anchors.left: sectionIcon.right
-                    anchors.leftMargin: Theme.iconGap
-                    anchors.right: sectionCount.left
-                    anchors.rightMargin: Theme.iconGap
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: section
-                    color: Theme.textPrimary
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontBody
-                    font.bold: true
-                    elide: Text.ElideRight
-                }
+                // ---- 子分类头行 ----
+                // 凡是含 "/" 的 group 都渲染自己这一行（carrier 的 delegate
+                // 排在大类头行之后）。所属大类折叠时高度归零（150ms，与脚本
+                // 行同一套 Behavior），子分类自身的折叠只收脚本行、这行保留。
+                Rectangle {
+                    id: subRow
+                    visible: sectionRoot.hasSub
+                    width: parent.width
+                    // 高度绑定带 hasSub 门：visible 只决定"参不参与布局"，
+                    // 不挡这行自己的高度值 —— 少了这个门，无子分类的大类
+                    // （System）收起时 delegate 会白占 28px。
+                    height: sectionRoot.hasSub && sectionRoot.majorExpanded
+                        ? Theme.rowSubGroupHeight : 0
+                    radius: Theme.radius
+                    color: subMouse.containsMouse ? Theme.fillHover : "transparent"
 
-                // 折叠后看不见成员，给个数量提示，不然收起来就完全没信息了。
-                Text {
-                    id: sectionCount
-                    anchors.right: parent.right
-                    anchors.rightMargin: Theme.rowPadding
-                    anchors.verticalCenter: parent.verticalCenter
-                    // groupCount 是模型的 Q_INVOKABLE。这里没有 model.count
-                    // 那样的依赖问题 —— section 变化本身就会让绑定重算，
-                    // 而模型重载时整个 delegate 会被重建。
-                    text: (root.model && root.model.groupCount)
-                        ? root.model.groupCount(section) : ""
-                    color: Theme.textTertiary
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontMicro
-                    visible: !sectionRoot.expanded
-                }
+                    Behavior on height {
+                        NumberAnimation { duration: Theme.durFast; easing.type: Theme.easing }
+                    }
 
-                MouseArea {
-                    id: sectionMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.toggleGroup(section)
+                    Behavior on color {
+                        ColorAnimation { duration: Theme.durFast; easing.type: Theme.easing }
+                    }
+
+                    // ---- 图标槽 ----
+                    // 常驻一个小箭头，不换文件夹 —— 它不是目录入口，
+                    // 是筛选开关，箭头要始终指明"这行能折叠"。尺寸沿用 16px
+                    // 图标槽（规格允许 12~16px，取与行图标同槽对齐），颜色压暗
+                    // 一档与大类头的悬停箭头区分层级。
+                    Item {
+                        id: subIcon
+                        width: Theme.iconSlot
+                        height: Theme.iconSlot
+                        anchors.left: parent.left
+                        // 缩进对齐到脚本行的图标槽之后（标题与脚本行同 x）。
+                        anchors.leftMargin: Theme.rowPadding + Theme.iconSlot + Theme.iconGap
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        Glyph {
+                            anchors.fill: parent
+                            kind: Glyph.Kind.Chevron
+                            color: Theme.textTertiary
+                            rotation: sectionRoot.subExpanded ? 90 : 0
+                            Behavior on rotation {
+                                NumberAnimation { duration: Theme.durFast; easing.type: Theme.easing }
+                            }
+                        }
+                    }
+
+                    Text {
+                        anchors.left: subIcon.right
+                        anchors.leftMargin: Theme.iconGap
+                        anchors.right: subCount.left
+                        anchors.rightMargin: Theme.iconGap
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: sectionRoot.subLabel
+                        color: Theme.textSecondary
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontBody
+                        elide: Text.ElideRight
+                    }
+
+                    // 折叠后看不见成员，给个数量提示（本子分类的成员数）。
+                    Text {
+                        id: subCount
+                        anchors.right: parent.right
+                        anchors.rightMargin: Theme.rowPadding
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: (root.model && root.model.groupCount)
+                            ? root.model.groupCount(section) : ""
+                        color: Theme.textTertiary
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontMicro
+                        visible: !sectionRoot.subExpanded
+                    }
+
+                    MouseArea {
+                        id: subMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        // 子分类头只折自己（key = 完整 group 串）。
+                        onClicked: root.toggleGroup(section)
+                    }
                 }
             }
         }
@@ -201,7 +415,11 @@ Item {
 
             readonly property bool isValid: model.valid === true
             readonly property bool isDestructive: model.destructive === true
-            readonly property bool inExpandedGroup: root.isExpanded(model.group)
+            // 两级折叠的门：大类（第一段）与子分类（完整 group 串）都展开
+            // 才可见。不含 "/" 的组两个 key 相同，天然一次折叠生效。
+            readonly property string rowGroup: model.group !== undefined ? model.group : ""
+            readonly property bool inExpandedGroup:
+                root.isExpanded(root.groupMajor(rowGroup)) && root.isExpanded(rowGroup)
             readonly property bool isCurrent: isValid && listView.currentIndex === index
 
             // 折叠时零高度且不可见。clip 是必须的 —— 高度动画到 0 的过程中
@@ -239,7 +457,8 @@ Item {
 
                 // ---- 状态槽 ----
                 // 缩进就靠这个 16px 槽对齐到分组头的文件夹图标下方
-                // （dsh 注释里的 "indent step 22px = 16px slot + 6px gap"）。
+                // （dsh 注释里的 "indent step 22px = 16px slot + 6px gap"；
+                // 子分类头的缩进同样对齐到这里）。
                 Item {
                     id: rowIcon
                     width: Theme.iconSlot

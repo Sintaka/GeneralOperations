@@ -12,6 +12,14 @@ import os
 import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# The offscreen platform plugin builds its own font database and looks in
+# <PySide2>/lib/fonts, which the PySide2 wheel does not ship. Every text query
+# then emits "Cannot find font directory" as a QtWarning AND routes it through
+# engine.warnings(), drowning the binding errors this script exists to catch.
+# Point the platform at the system fonts instead (Windows only; other platforms
+# ship fontconfig/freetype system databases).
+if sys.platform == "win32":
+    os.environ.setdefault("QT_QPA_FONTDIR", "C:/Windows/Fonts")
 from PySide2.QtCore import QtMsgType, QUrl, qInstallMessageHandler
 from PySide2.QtGui import QGuiApplication
 from PySide2.QtQml import QQmlComponent, QQmlEngine
@@ -51,6 +59,56 @@ from mockmodel import MockModel  # noqa: E402
 
 _model = MockModel()
 engine.rootContext().setContextProperty("scriptModel", _model)
+
+# main.qml reads more context properties than scriptModel -- C++ main.cpp
+# also supplies startupRequest / scriptRunner / dropDebugMode at runtime, and
+# main.qml grew references to them after this harness first stubbed only
+# scriptModel. Without stubs every main.qml run reports one ReferenceError per
+# reference, and a genuine new error would be easy to miss among the expected
+# noise -- the exact reason scriptModel is stubbed above. Shapes mirror
+# main.cpp: an empty startup request (no CLI run) and an idle runner.
+from PySide2.QtCore import QObject, Property, Signal, Slot  # noqa: E402
+
+engine.rootContext().setContextProperty("startupRequest", {"script": "", "files": []})
+engine.rootContext().setContextProperty("dropDebugMode", False)
+
+
+class _StubRunner(QObject):
+    """Idle ScriptRunner stand-in with the members main.qml reads at
+    instantiation time (running/spawnError/hasRun/lastExitCode/tail).
+    run() exists for completeness but is never called here -- exercising it
+    would need the C++ process machinery."""
+
+    _changed = Signal()
+
+    def _running(self):
+        return False
+
+    def _spawnError(self):
+        return ""
+
+    def _hasRun(self):
+        return False
+
+    def _lastExitCode(self):
+        return 0
+
+    def _tail(self):
+        return ""
+
+    running = Property(bool, _running, notify=_changed)
+    spawnError = Property(str, _spawnError, notify=_changed)
+    hasRun = Property(bool, _hasRun, notify=_changed)
+    lastExitCode = Property(int, _lastExitCode, notify=_changed)
+    tail = Property(str, _tail, notify=_changed)
+
+    @Slot(str, list, "QVariant")
+    def run(self, script, files, values):
+        pass
+
+
+_runner = _StubRunner()
+engine.rootContext().setContextProperty("scriptRunner", _runner)
 
 warns = []
 engine.warnings.connect(lambda ws: warns.extend(w.toString() for w in ws))

@@ -71,6 +71,17 @@ Item {
             sourceRect: Qt.rect(root.x, root.y, root.width, root.height)
             // 背景是静态的，取样结果不需要每帧重算。
             live: false
+            // 【半分辨率取样】live resize 期间 sourceRect 每帧都在变，slice
+            // 每帧重取样、FastBlur(radius 20) 每帧全分辨率重跑。模糊天生
+            // 抹掉高频，把输入像素量降到 1/4 在 20px 模糊后面完全看不出差别。
+            // textureSize 同时把这张 FBO 锁在半分辨率：否则重取样本身还会
+            // 随面板尺寸逐帧重分配 FBO。
+            // 尺寸再量化到 4px 步进（/8 后取整再 *4 = 半宽对齐 4）：精确的
+            // width/2 会在 resize 时每像素都变，FBO 就又回到逐帧重分配；
+            // 量化后只有跨过 8 逻辑像素的边界才重分配一次。
+            textureSize: Qt.size(
+                Math.max(1, Math.round(root.width / 8) * 4),
+                Math.max(1, Math.round(root.height / 8) * 4))
             visible: false
         }
 

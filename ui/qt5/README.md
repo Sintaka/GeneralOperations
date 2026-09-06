@@ -13,7 +13,7 @@ Qt5 Quick (QML) / C++17 / MinGW（MSVC 备选）。
 
 ## 当前状态
 
-可用：左侧 Outliner 显示真实脚本树（按 `@group` 分组、点组头折叠并显示成员数、破坏性脚本行首红色感叹号、解析失败的脚本灰掉且不可选中）；右侧参数面板按 docstring 的 `@param` 动态生成控件（int/float 滑块 + presets 快捷档位胶囊、bool 自绘复选框、choice 互斥胶囊组；str/path 参数暂不支持编辑，按默认值跑）；拖多文件执行，破坏性脚本先二次确认；stdout/stderr 合流回显到底部输出块；`@host blender` 脚本经 `blender --background --python <脚本> <flags> -- <files>` 执行；`GeneralOperationsLauncher.exe <脚本> <文件...>` 命令行直跑是自动化验证入口。
+可用：左侧 Outliner 以两级树显示真实脚本树（大类 = `@group` 首段即脚本目录第一层，子分类 = 第二层；点大类头折叠整个大类并显示该大类脚本总数，点子分类头只折叠该子分类并显示其成员数；破坏性脚本行首红色感叹号、解析失败的脚本灰掉且不可选中）；右侧参数面板按 docstring 的 `@param` 动态生成控件（int/float 滑块 + presets 快捷档位胶囊、bool 自绘复选框、choice 互斥胶囊组；str/path 参数暂不支持编辑，按默认值跑）；拖多文件执行，破坏性脚本先二次确认；stdout/stderr 合流回显到底部输出块；`@host blender` 脚本经 `blender --background --python <脚本> <flags> -- <files>` 执行；`GeneralOperationsLauncher.exe <脚本> <文件...>` 命令行直跑是自动化验证入口。
 
 未做：脚本执行队列（一次一个进程，运行中再触发会拒绝）、执行历史、设置持久化面板。
 
