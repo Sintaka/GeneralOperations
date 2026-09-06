@@ -1,6 +1,6 @@
 """
 @name        Cross Split
-@group       Image
+@group       Image/Edit
 @desc        以中心十字线将图片裁成四块（左上/右上/左下/右下），输出到源目录
 @accepts     file
 @ext         .png .jpg .jpeg .bmp .gif .tiff .tif .webp .ico .jfif

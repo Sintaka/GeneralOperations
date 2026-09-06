@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""
 @name        PMX to FBX
-@group       Geometry
+@group       Geometry/Format Convert
 @desc        用 Blender + mmd_tools 将 MMD PMX 模型转换为 FBX，保留材质/贴图/形态键/骨架
 @accepts     file
 @ext         .pmx

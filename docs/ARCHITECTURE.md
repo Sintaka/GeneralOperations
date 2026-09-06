@@ -21,11 +21,11 @@
                                    ▼
         契约层（不是一个目录，是四个单点约定）
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ 1. 根 CMakeLists.txt：前端/后端选择、GO_* 变量、输出与 zip 命名；          │
+│ 1. 根 CMakeLists.txt：前端选择、GO_* 变量、输出与 zip 命名；               │
 │    全仓库唯一 project()，版本号只此一处                                   │
 │ 2. docs/SCRIPT_SPEC.md：脚本 docstring 声明块，前端与打包管线共同消费     │
 │ 3. 脚本目录解析链：exe 同级 scripts/ → 开发期 GO_DEV_SCRIPTS_DIR → 报错   │
-│ 4. bundle 装配管线：POST_BUILD 装配 output/x64-<前端>-<后端>/<Config>/    │
+│ 4. bundle 装配管线：POST_BUILD 装配 output/x64-<前端>/<Config>/           │
 │    （管线脚本由前端持有，入参见「关键契约」）                             │
 └──────────────────────────────────────────────────────────────────────────┘
                                    │
@@ -83,7 +83,7 @@
 
 ## 关键契约
 
-前端、后端、打包三方共同依赖的约定全部收口在此。改任何一条 = 三方同时动，
+前端、内核、打包三方共同依赖的约定全部收口在此。改任何一条 = 三方同时动，
 所以逐条列出；与根 `CMakeLists.txt` 不一致时以代码为准并回来改本节。
 
 ### 变量（GO_*）
@@ -91,10 +91,9 @@
 | 变量 | 定义处 | 语义 |
 |---|---|---|
 | `GO_FRONTEND` | 根 CMakeLists（cache） | 前端选择：`qt5`（默认）\| `qt6.8lts`（占位）\| `tauri2`（占位） |
-| `GO_BACKEND` | 根 CMakeLists（cache） | 后端选择：`python`（默认）\| `cpp`（占位） |
 | `GO_PYTHON_SCRIPTS_DIR` | core/python/CMakeLists（PARENT_SCOPE 导出） | "脚本在哪里"是 core/python 的自述，根不写死路径——将来脚本换目录只动 core/python 一处 |
-| `GO_CORE_SCRIPTS_DIR` | 根 CMakeLists（当前无条件 = `GO_PYTHON_SCRIPTS_DIR`，即 `core/python/scripts`） | 后端无关的脚本目录。前端与打包管线只认这个名字，不需要知道脚本由哪种后端提供；将来 `GO_BACKEND` 真分叉时只改这里的指向 |
-| `GO_BUNDLE_DIR` | 根 CMakeLists | 发行装配根：`output/x64-<前端>-<后端>`；装配落在其 `<Config>` 子目录（Debug/Release）。带前端-后端段：不同组合的产物落到各自子目录互不覆盖；带 x64 段：为将来非 Windows/非 64 位产物留位 |
+| `GO_CORE_SCRIPTS_DIR` | 根 CMakeLists（当前无条件 = `GO_PYTHON_SCRIPTS_DIR`，即 `core/python/scripts`） | 内核无关的脚本目录。前端与打包管线只认这个名字，不需要知道脚本资产由哪个内核提供；两个内核无条件一起构建，指向仍由根这单点维护 |
+| `GO_BUNDLE_DIR` | 根 CMakeLists | 发行装配根：`output/x64-<前端>`；装配落在其 `<Config>` 子目录（Debug/Release）。带前端段：不同前端的产物落到各自子目录互不覆盖；带 x64 段：为将来非 Windows/非 64 位产物留位 |
 | `GO_ZIP_FILE` | 根 CMakeLists | 发行 zip 绝对路径（命名见「输出与命名」）；**仅单配置（`CMAKE_BUILD_TYPE` 非空）下定义** |
 | `GO_DEV_SCRIPTS_DIR` | 前端 CMakeLists（编译期注入，值取 `GO_CORE_SCRIPTS_DIR`） | 开发期脚本解析路径，见「脚本目录解析链」 |
 
@@ -123,10 +122,10 @@
 | 产物 | 路径 |
 |---|---|
 | 构建目录 | `build/<presetName>/`（如 `build/qt5-mingw-debug/`） |
-| 自包含发行装配 | `output/x64-<前端>-<后端>/<Config>/`，默认组合即 `output/x64-qt5-python/Release/` |
-| 发行 zip | `output/GeneralOperations-<版本>_x64-<前端>-<后端>-<release\|debug>.zip`，如 `GeneralOperations-0.2.000_x64-qt5-python-release.zip` |
+| 自包含发行装配 | `output/x64-<前端>/<Config>/`，默认前端即 `output/x64-qt5/Release/` |
+| 发行 zip | `output/GeneralOperations-<版本>_x64-<前端>-<release\|debug>.zip`，如 `GeneralOperations-0.2.000_x64-qt5-release.zip` |
 
-- 版本号唯一来源：根 `project(GeneralOperations VERSION 0.2.000)`，子项目不得
+- 版本号唯一来源：根 `project(GeneralOperations VERSION 0.2.xxx)`，子项目不得
   声明版本（版本策略见「血统」）。
 - zip 名的 `<release|debug>` 是 `CMAKE_BUILD_TYPE` 的小写。多配置生成器一次
   configure 出多个配置、按哪个算 zip 名都不对，所以根 CMakeLists 对空
@@ -141,7 +140,7 @@
 
 约定：`<前端><工具链>-<配置>`；deploy 是 build preset（复用对应 release 的
 configure，附 `--target deploy`）。所有非 hidden 的 configure preset 显式带
-`GO_FRONTEND` / `GO_BACKEND`——这是未来新前端 preset 的模板（qt6.8lts 已预记
+`GO_FRONTEND`——这是未来新前端 preset 的模板（qt6.8lts 已预记
 `qt68lts-mingw-debug` 这类名字，见 `ui/qt6.8lts/README.md`）。
 
 ### bundle 管线参数（前端持有）
@@ -153,7 +152,7 @@ bundle 装配脚本由前端持有（约定放在前端目录的 `cmake/` 下，
 |---|---|---|
 | `BUNDLE_SCRIPTS` | `GO_CORE_SCRIPTS_DIR` | 脚本源：拷进装配目录 `scripts/`，并汇总 `@requires` 生成 requirements.txt |
 | `BUNDLE_QMLDIR` | 前端 QML 源目录 | windeployqt 的 `--qmldir`，据此决定部署哪些 QML 模块 |
-| `BUNDLE_CACHE` | 仓库根 `.cache/` | embeddable Python zip 与 get-pip.py 的下载缓存（只下一次） |
+| `BUNDLE_CACHE` | 仓库根 `.cache/` | embeddable Python zip、get-pip.py 与 Real-ESRGAN zip 的下载缓存（只下一次） |
 | `BUNDLE_EXE` / `BUNDLE_OUT` / `BUNDLE_CONF` / `BUNDLE_WIN` / `BUNDLE_MINGW` / `BUNDLE_WDT` / `BUNDLE_QT_BIN` | 同第二代仓库 | exe 路径、装配目录、配置、平台/工具链旗标、windeployqt 与 Qt bin 路径，语义不变 |
 
 为什么把第二代仓库的单参数 `BUNDLE_SRC`（源码树根）拆成三个：旧仓里脚本
@@ -179,7 +178,7 @@ CMakePresets、tasks.json）互相引用 preset 名，漏一件就会在某一�
    GUI 目标树（Qt 版本、QML 模块、windeployqt 差异），不存在同一次构建里
    两个前端并存的需求。
 3. **`CMakePresets.json` 加 preset 组。** configure preset 继承 hidden
-   `base`（+ 该前端的工具链组），显式带 `GO_FRONTEND=foo` 与 `GO_BACKEND`；
+   `base`（+ 该前端的工具链组），显式带 `GO_FRONTEND=foo`；
    build preset 同名对应，deploy 变体复用 release configure 附
    `--target deploy`。命名 `<前端><工具链>-<配置>`。
 4. **`.vscode/tasks.json` 加任务组。** 照 qt5 的任务组复制改 preset 名：
@@ -189,34 +188,32 @@ CMakePresets、tasks.json）互相引用 preset 名，漏一件就会在某一�
    README 写清定位、构建命令与前端专属约定。
 
 验证清单（全过才算接完）：`cmake --preset foo-<工具链>-debug` configure 通过，
-且结尾摘要的 `[GO]` 四个值正确 → 构建成功 → 运行 exe 能看到脚本树（解析链 ②
+且结尾摘要的 `[GO]` 各值正确 → 构建成功 → 运行 exe 能看到脚本树（解析链 ②
 生效）→ `--target release_zip` 产出
-`output/GeneralOperations-<版本>_x64-foo-<后端>-<配置>.zip`，解压后拷到别的
+`output/GeneralOperations-<版本>_x64-foo-<配置>.zip`，解压后拷到别的
 目录也能跑（解析链 ① 生效）。
 
 ## 新增一个后端
 
-以假想的 `core/foo` 为例（真 C++ 内核、或未来任何工具链后端）：
+后端不再是一个可选项：编译与发行不区分后端，`core/` 下所有内核无条件一起
+构建、一起进发行——产物目录与 zip 名只带前端段，没有后端段。以假想的
+`core/foo` 为例（真 C++ 内核、或未来任何工具链内核），接入只需两步：
 
 1. **建 `core/foo/`。** 内核实现 + `README.md`；若走 CMake，其 `CMakeLists.txt`
    只做两件事：挂 target（命名 `go_<名>_*` 或按需），并向父作用域导出自己的
    资源/脚本目录变量（模式照 `GO_PYTHON_SCRIPTS_DIR`：目录是子目录的自述，
-   根不写死）。零 Qt、零 ui 依赖——依赖方向铁律对后端同样成立。
-2. **根 `CMakeLists.txt` 接入。** `add_subdirectory(core/foo)`；`GO_BACKEND`
-   的 STRINGS 加上新取值。注意当前 `GO_CORE_SCRIPTS_DIR` 无条件指向
-   `GO_PYTHON_SCRIPTS_DIR`（cpp 只是占位，根暂不按后端分支）；真后端落地时，
-   把这里改成按 `GO_BACKEND` 分支选源——这是预留好的改造点。
-3. **调整 `GO_CORE_SCRIPTS_DIR` 指向。** 前端只认这个名字。"后端可替换"的
-   全部意义就在于此：换后端不动任何前端代码，只动根这一处指向。
-4. **bundle 适配。** 前端 bundle 管线只消费 `GO_CORE_SCRIPTS_DIR`（经
-   `BUNDLE_SCRIPTS`）：脚本型后端沿用现管线（拷脚本、汇总 `@requires`、内嵌
-   运行时）；非脚本型后端（如 C++ 内核直接链进前端）的交付物走自己的 target
-   链路，此时 `GO_CORE_SCRIPTS_DIR` 仍可指向剩余的脚本资产。适配收口在前端
-   bundle 一处，不散落。
+   根不写死）。零 Qt、零 ui 依赖——依赖方向铁律对内核同样成立。
+2. **根 `CMakeLists.txt` 加一行。** `add_subdirectory(core/foo)`，不做任何
+   条件分支——与前端唯一的结构差异就在这里：前端决定整棵 GUI 目标树，一次
+   只构建一个所以走分支；内核彼此正交，无条件全部一起构建。
 
-验收：`GO_BACKEND=<新值>` configure 后，`[GO]` 摘要里 `GO_CORE_SCRIPTS_DIR`
-指向正确、`GO_BUNDLE_DIR` / `GO_ZIP_FILE` 的后端段（`x64-<前端>-<新后端>`）
-正确；前端运行与发行流程不回归。
+`GO_CORE_SCRIPTS_DIR` 的指向仍由根单点维护（当前指向 `GO_PYTHON_SCRIPTS_DIR`）：
+前端与打包管线只认这个名字，新内核若也提供脚本资产，改根这一处指向即可，
+前端零改动；bundle 管线只消费 `GO_CORE_SCRIPTS_DIR`（经 `BUNDLE_SCRIPTS`），
+非脚本型内核不碰它，无需适配。
+
+验收：configure 后 `[GO]` 摘要正确（`GO_CORE_SCRIPTS_DIR` 指向正确、
+`GO_BUNDLE_DIR` / `GO_ZIP_FILE` 命名无后端段）；前端运行与发行流程不回归。
 
 ## 血统
 
@@ -238,23 +235,23 @@ CMakePresets、tasks.json）互相引用 preset 名，漏一件就会在某一�
 
 | 源文件（python/GeneralOperations） | 现文件（core/python/scripts） | 说明 |
 |---|---|---|
-| geo.pmx2fbx.py | geo.pmx2fbx.py | 保留；适配为 `@host blender` 特例，Blender 路径改由脚本头 `@blender` 键声明，参数经 `--` 分隔符传入 |
+| geo.pmx2fbx.py | Geometry/Format Convert/geo.pmx2fbx.py | 保留；适配为 `@host blender` 特例，Blender 路径改由脚本头 `@blender` 键声明，参数经 `--` 分隔符传入 |
 | geo.pmx2fbx_launch.bat | 未迁移 | 单文件 PMX→FBX 拖拽启动器（硬编码 Blender 路径、pause 阻塞、日志重定向），职责由 GUI 启动器接管 |
 | geo.pmx2fbx_launch_multi.bat | 未迁移 | 批量 PMX→FBX 拖拽启动器（调试日志 + 逐文件循环调用），职责由 GUI 启动器接管 |
-| img.EXR2PNG_SceneLinear_sRGB.Display.py | 合并入 img.EXR2PNG_Large.py | 全分辨率 EXR→PNG（ACES 显示变换）；新版把输出上限做成 `@param target`，target ≥ 原图长边时不缩放，等价原版 |
-| img.EXR2PNG_to4K_SceneLinear_sRGB.Display.py | 合并入 img.EXR2PNG_Large.py | 流式降采样 ≤4K 版（8K/16K 大图不爆内存）；即新版默认行为（target 默认 4096） |
-| img.FlipImage_Horizontal.py | img.FlipImage_Horizontal.py | 重写为 argparse + 契约头；Pillow 常规图与 OpenEXR 两条翻转路径保留 |
-| img.Resize_to_1k_jpg.py | 合并入 img.Resize_jpg.py | 与 2k/4k 版仅 `MAX_PIXELS = 1024` 一行之差；对应 `@param max_pixels` 预设档 1024 |
-| img.Resize_to_2k_jpg.py | 合并入 img.Resize_jpg.py | 原 `MAX_PIXELS = 2048`；对应预设档 2048 |
-| img.Resize_to_4k_jpg.py | 合并入 img.Resize_jpg.py | 原 `MAX_PIXELS = 4096`；对应预设档 4096 |
-| img.Zbrush_UDIM_Correction.py | img.Zbrush_UDIM_Correction.py | 重写为 argparse + 契约头，补 `@destructive`（原地翻转 EXR 像素并按行镜像重排 UDIM 编号） |
-| img.crossSplit.py | img.crossSplit.py | 重写为 argparse + 契约头；中心十字切四块逻辑不变 |
+| img.EXR2PNG_SceneLinear_sRGB.Display.py | 合并入 Image/Format Convert/img.EXR2PNG_Large.py | 全分辨率 EXR→PNG（ACES 显示变换）；新版把输出上限做成 `@param target`，target ≥ 原图长边时不缩放，等价原版 |
+| img.EXR2PNG_to4K_SceneLinear_sRGB.Display.py | 合并入 Image/Format Convert/img.EXR2PNG_Large.py | 流式降采样 ≤4K 版（8K/16K 大图不爆内存）；即新版默认行为（target 默认 4096） |
+| img.FlipImage_Horizontal.py | Image/Edit/img.FlipImage_Horizontal.py | 重写为 argparse + 契约头；Pillow 常规图与 OpenEXR 两条翻转路径保留 |
+| img.Resize_to_1k_jpg.py | 合并入 Image/ReSize/img.Resize_jpg.py | 与 2k/4k 版仅 `MAX_PIXELS = 1024` 一行之差；对应 `@param max_pixels` 预设档 1024 |
+| img.Resize_to_2k_jpg.py | 合并入 Image/ReSize/img.Resize_jpg.py | 原 `MAX_PIXELS = 2048`；对应预设档 2048 |
+| img.Resize_to_4k_jpg.py | 合并入 Image/ReSize/img.Resize_jpg.py | 原 `MAX_PIXELS = 4096`；对应预设档 4096 |
+| img.Zbrush_UDIM_Correction.py | Image/Edit/img.Zbrush_UDIM_Correction.py | 重写为 argparse + 契约头，补 `@destructive`（原地翻转 EXR 像素并按行镜像重排 UDIM 编号） |
+| img.crossSplit.py | Image/Edit/img.crossSplit.py | 重写为 argparse + 契约头；中心十字切四块逻辑不变 |
 | img.x2_0.bat | 未迁移 | Real-ESRGAN 2x 放大启动器（调用外部 realesrgan-ncnn-vulkan.exe），被 GUI 取代，暂无对应脚本 |
 | os.FlattenFolderHierarchy.py | os.FlattenFolderHierarchy.py | 重写为 argparse + 契约头；展平深度做成 `@param levels` |
 
 合并结果：**13 个源文件 → 7 个内核脚本**（5 个重写保留；EXR2PNG 两版合并为
-`img.EXR2PNG_Large.py`；Resize 三档合并为 `img.Resize_jpg.py`；3 个 .bat
-启动器被 GUI 取代淘汰，未迁移）。
+`Image/Format Convert/img.EXR2PNG_Large.py`；Resize 三档合并为
+`Image/ReSize/img.Resize_jpg.py`；3 个 .bat 启动器被 GUI 取代淘汰，未迁移）。
 
 对应的 C++ 内核占位（core/cpp）挑了两个函数下沉为内存纯函数：
 `flip_horizontal_rgba8` ↔ `img.FlipImage_Horizontal`、`udim_mirror` ↔
@@ -266,5 +263,5 @@ CMakePresets、tasks.json）互相引用 preset 名，漏一件就会在某一�
   携带它；AGENTS.md 收尾流程规定每轮收尾 patch 位 +1。
 - 0.1.x 属于第二代旧仓库，本仓库从 **0.2.000** 起算——monorepo 重构在发布
   语义上是一次断代（输出路径、zip 命名、构建入口全变），不与旧版本号连续。
-- 未来接入 qt6.8lts / tauri2 前端或 cpp 后端**不**换主版本号：它们是同一
-  产品的可替换组件，版本跟着用户可见的产物走，不跟着仓库内部结构走。
+- 未来接入 qt6.8lts / tauri2 前端**不**换主版本号：前端是同一产品的可替换
+  组件，版本跟着用户可见的产物走，不跟着仓库内部结构走。

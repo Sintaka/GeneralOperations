@@ -31,22 +31,20 @@
     {
       "name": "qt5-mingw-debug",
       "inherits": "qt5-mingw",
-      "displayName": "qt5+python MinGW Debug (默认)",
-      "description": "GCC 8.1 + Qt5.15.2 mingw81_64。编译器/ninja 全绝对路径，不需要选 kit，不依赖 PATH。非 hidden preset 都显式带 GO_FRONTEND/GO_BACKEND —— 这是未来新前端 preset 的模板。",
+      "displayName": "qt5 MinGW Debug (默认)",
+      "description": "GCC 8.1 + Qt5.15.2 mingw81_64。编译器/ninja 全绝对路径，不需要选 kit，不依赖 PATH。非 hidden preset 都显式带 GO_FRONTEND —— 这是未来新前端 preset 的模板。",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "GO_FRONTEND": "qt5",
-        "GO_BACKEND": "python"
+        "GO_FRONTEND": "qt5"
       }
     },
     {
       "name": "qt5-mingw-release",
       "inherits": "qt5-mingw",
-      "displayName": "qt5+python MinGW Release (体积优化)",
+      "displayName": "qt5 MinGW Release (体积优化)",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "GO_FRONTEND": "qt5",
-        "GO_BACKEND": "python"
+        "GO_FRONTEND": "qt5"
       }
     },
     {
@@ -61,21 +59,19 @@
     {
       "name": "qt5-msvc-debug",
       "inherits": "qt5-msvc",
-      "displayName": "qt5+python MSVC Debug",
+      "displayName": "qt5 MSVC Debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "GO_FRONTEND": "qt5",
-        "GO_BACKEND": "python"
+        "GO_FRONTEND": "qt5"
       }
     },
     {
       "name": "qt5-msvc-release",
       "inherits": "qt5-msvc",
-      "displayName": "qt5+python MSVC Release (体积最小)",
+      "displayName": "qt5 MSVC Release (体积最小)",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "GO_FRONTEND": "qt5",
-        "GO_BACKEND": "python"
+        "GO_FRONTEND": "qt5"
       }
     }
   ],

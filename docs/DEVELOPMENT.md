@@ -15,10 +15,10 @@
    脚本搞坏。
 
 启动器把这两件事收口：左侧 Outliner 选脚本、右侧调参数、拖文件进去执行；
-Python 环境由启动器托管。monorepo 化在此基础上再加一层目标：**前端与后端
-都可替换**（qt5 → qt6.8lts / tauri2；python → cpp），靠根 CMake 的 GO_* 契约
-单点收口，扩展步骤见 `docs/ARCHITECTURE.md` 的「新增一个前端」「新增一个
-后端」。
+Python 环境由启动器托管。monorepo 化在此基础上再加一层目标：**前端可替换**
+（qt5 → qt6.8lts / tauri2），内核（core/）无条件一起构建、不参与选择——产物
+与发行命名只区分前端，靠根 CMake 的 GO_* 契约单点收口，扩展步骤见
+`docs/ARCHITECTURE.md` 的「新增一个前端」「新增一个后端」。
 
 ## 约束优先级
 
@@ -51,7 +51,7 @@ GCC 8.1 不是同一套 C++ 运行时。要用就用 Qt 目录下配套那份。
 
 ```
 cmake --preset qt5-mingw-debug              # 配置（默认 preset）
-cmake --build --preset qt5-mingw-debug      # 构建；POST_BUILD 自动装配 output/x64-qt5-python/Debug
+cmake --build --preset qt5-mingw-debug      # 构建；POST_BUILD 自动装配 output/x64-qt5/Debug
 build/qt5-mingw-debug/GeneralOperationsLauncher.exe    # 运行（VS Code 任务"运行 (qt5-debug)"）
 
 cmake --build --preset qt5-mingw-release --target release_zip    # 发行 zip（构建 + 装配 + 压包）

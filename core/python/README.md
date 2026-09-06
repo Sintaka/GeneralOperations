@@ -18,8 +18,19 @@ Qt 只属于 ui/ 层的启动器前端；脚本与 GUI 框架、Python 环境完
 ```
 core/python/
 ├── CMakeLists.txt   # 只做一件事：向父作用域导出 GO_PYTHON_SCRIPTS_DIR
-└── scripts/         # 全部内核脚本（启动器自动发现，见下文）
+└── scripts/         # 全部内核脚本（启动器递归自动发现，见下文）
+    ├── Image/
+    │   ├── Format Convert/  img.EXR2PNG_Large.py
+    │   ├── ReSize/          img.Resize_jpg.py
+    │   └── Edit/            img.FlipImage_Horizontal.py  img.crossSplit.py  img.Zbrush_UDIM_Correction.py
+    ├── Geometry/
+    │   └── Format Convert/  geo.pmx2fbx.py
+    └── os.FlattenFolderHierarchy.py        # 留在根，@group System
 ```
+
+目录即分组：`@group` 与脚本相对 `scripts/` 的目录路径一致（`/` 分隔层级，
+规范见 `docs/SCRIPT_SPEC.md` 的 `@group` 键；一致性由 `tools/check_repo.py`
+检查兜底）。启动器递归扫描整棵 `scripts/` 树，子目录层数不限。
 
 ## 溯源映射表
 
@@ -29,17 +40,17 @@ core/python/
 
 | 源文件（python/GeneralOperations） | 现文件（core/python/scripts） | 说明 |
 |---|---|---|
-| geo.pmx2fbx.py | geo.pmx2fbx.py | 保留；适配为 `@host blender` 特例，Blender 路径改由脚本头 `@blender` 键声明，参数经 `--` 分隔符传入 |
+| geo.pmx2fbx.py | Geometry/Format Convert/geo.pmx2fbx.py | 保留；适配为 `@host blender` 特例，Blender 路径改由脚本头 `@blender` 键声明，参数经 `--` 分隔符传入 |
 | geo.pmx2fbx_launch.bat | 未迁移 | 单文件 PMX→FBX 拖拽启动器（硬编码 Blender 路径、pause 阻塞、日志重定向），职责由 GUI 启动器接管 |
 | geo.pmx2fbx_launch_multi.bat | 未迁移 | 批量 PMX→FBX 拖拽启动器（调试日志 + 逐文件循环调用），职责由 GUI 启动器接管 |
-| img.EXR2PNG_SceneLinear_sRGB.Display.py | 合并入 img.EXR2PNG_Large.py | 全分辨率 EXR→PNG（ACES 显示变换）；新版把输出上限做成 `@param target`，target ≥ 原图长边时不缩放，等价原版 |
-| img.EXR2PNG_to4K_SceneLinear_sRGB.Display.py | 合并入 img.EXR2PNG_Large.py | 流式降采样 ≤4K 版（8K/16K 大图不爆内存）；即新版默认行为（target 默认 4096） |
-| img.FlipImage_Horizontal.py | img.FlipImage_Horizontal.py | 重写为 argparse + 契约头；Pillow 常规图与 OpenEXR 两条翻转路径保留 |
-| img.Resize_to_1k_jpg.py | 合并入 img.Resize_jpg.py | 与 2k/4k 版仅 `MAX_PIXELS = 1024` 一行之差；对应 `@param max_pixels` 预设档 1024 |
-| img.Resize_to_2k_jpg.py | 合并入 img.Resize_jpg.py | 原 `MAX_PIXELS = 2048`；对应预设档 2048 |
-| img.Resize_to_4k_jpg.py | 合并入 img.Resize_jpg.py | 原 `MAX_PIXELS = 4096`；对应预设档 4096 |
-| img.Zbrush_UDIM_Correction.py | img.Zbrush_UDIM_Correction.py | 重写为 argparse + 契约头，补 `@destructive`（原地翻转 EXR 像素并按行镜像重排 UDIM 编号） |
-| img.crossSplit.py | img.crossSplit.py | 重写为 argparse + 契约头；中心十字切四块逻辑不变 |
+| img.EXR2PNG_SceneLinear_sRGB.Display.py | 合并入 Image/Format Convert/img.EXR2PNG_Large.py | 全分辨率 EXR→PNG（ACES 显示变换）；新版把输出上限做成 `@param target`，target ≥ 原图长边时不缩放，等价原版 |
+| img.EXR2PNG_to4K_SceneLinear_sRGB.Display.py | 合并入 Image/Format Convert/img.EXR2PNG_Large.py | 流式降采样 ≤4K 版（8K/16K 大图不爆内存）；即新版默认行为（target 默认 4096） |
+| img.FlipImage_Horizontal.py | Image/Edit/img.FlipImage_Horizontal.py | 重写为 argparse + 契约头；Pillow 常规图与 OpenEXR 两条翻转路径保留 |
+| img.Resize_to_1k_jpg.py | 合并入 Image/ReSize/img.Resize_jpg.py | 与 2k/4k 版仅 `MAX_PIXELS = 1024` 一行之差；对应 `@param max_pixels` 预设档 1024 |
+| img.Resize_to_2k_jpg.py | 合并入 Image/ReSize/img.Resize_jpg.py | 原 `MAX_PIXELS = 2048`；对应预设档 2048 |
+| img.Resize_to_4k_jpg.py | 合并入 Image/ReSize/img.Resize_jpg.py | 原 `MAX_PIXELS = 4096`；对应预设档 4096 |
+| img.Zbrush_UDIM_Correction.py | Image/Edit/img.Zbrush_UDIM_Correction.py | 重写为 argparse + 契约头，补 `@destructive`（原地翻转 EXR 像素并按行镜像重排 UDIM 编号） |
+| img.crossSplit.py | Image/Edit/img.crossSplit.py | 重写为 argparse + 契约头；中心十字切四块逻辑不变 |
 | img.x2_0.bat | 未迁移 | Real-ESRGAN 2x 放大启动器（调用外部 realesrgan-ncnn-vulkan.exe），被 GUI 取代，暂无对应脚本 |
 | os.FlattenFolderHierarchy.py | os.FlattenFolderHierarchy.py | 重写为 argparse + 契约头；展平深度做成 `@param levels` |
 
@@ -48,9 +59,11 @@ EXR2PNG×2 → 1 个、Resize×3 → 1 个；3 个 .bat 启动器被 GUI 取代�
 
 ## 如何新增脚本
 
-1. 把一个 `.py` 放进 `scripts/`；
+1. 把一个 `.py` 放进 `scripts/` 下对应分组的子目录（目录路径即 `@group`，
+   `/` 分隔层级；新分组就建新目录）；
 2. 在文件开头写好 docstring 契约头（`@name` / `@group` / `@desc` / `@accepts`
-   为必填，规范与示例见根目录 `docs/SCRIPT_SPEC.md`）；
+   为必填，规范与示例见根目录 `docs/SCRIPT_SPEC.md`；`@group` 写脚本相对
+   `scripts/` 的目录路径）；
 3. 完成。启动器下次启动自动发现该脚本，C++ 侧与 CMake 侧都不用改——
    `CMakeLists.txt` 只导出目录路径，不枚举文件。
 

@@ -1,6 +1,6 @@
 """
 @name        Resize to JPEG
-@group       Image
+@group       Image/ReSize
 @desc        等比缩放长边到指定像素并转为 JPEG，输出到源目录：原名_<长边像素>px.jpg（photo.png → photo_1024px.jpg），同名直接覆盖
 @accepts     file
 @ext         .jpg .jpeg .png .bmp .gif .tiff .tif .webp .ico .jfif

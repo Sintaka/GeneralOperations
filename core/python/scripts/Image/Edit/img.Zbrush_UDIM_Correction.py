@@ -1,6 +1,6 @@
 """
 @name        Zbrush UDIM Correction
-@group       Image
+@group       Image/Edit
 @desc        水平翻转 EXR 内容并按行镜像重排 UDIM 编号，修正 Zbrush 导出方向
 @accepts     file
 @ext         .exr

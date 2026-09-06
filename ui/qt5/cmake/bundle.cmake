@@ -2,6 +2,7 @@
 # 把构建产物装配成自包含的 output/<配置>/：
 #   exe + scripts/ + Qt 运行时（windeployqt）+ 相对路径 qt.conf
 #   + 内嵌 Python（Windows）或 run.sh 首次运行建 venv（Linux）
+#   + 预置工具 Real-ESRGAN（仅 Windows，构建期下载展开）
 #
 # 全程相对路径：成品目录整体拷走/压 zip 后，任何同架构机器可直接运行。
 # 布局与部署说明见 docs/RELEASE.md。
@@ -18,8 +19,9 @@
 #                   requirements.txt —— 替代旧仓库从 BUNDLE_SRC 推出的 <src>/scripts
 #   BUNDLE_QMLDIR   前端 QML 源目录，windeployqt 的 --qmldir 用
 #                   —— 替代旧仓库从 BUNDLE_SRC 推出的 <src>/src/qml
-#   BUNDLE_CACHE    下载缓存目录（仓库根 .cache/），embeddable Python zip 与
-#                   get-pip.py 只下一次 —— 替代旧仓库从 BUNDLE_SRC 推出的 <src>/.cache
+#   BUNDLE_CACHE    下载缓存目录（仓库根 .cache/），embeddable Python zip、
+#                   get-pip.py 与 Real-ESRGAN zip 只下一次 —— 替代旧仓库从
+#                   BUNDLE_SRC 推出的 <src>/.cache
 
 set(_out "${BUNDLE_OUT}")
 file(MAKE_DIRECTORY "${_out}")
@@ -36,7 +38,9 @@ file(COPY "${BUNDLE_SCRIPTS}" DESTINATION "${_out}"
 # 【架构约束】后端（C++ core + Python 脚本）不依赖 Qt：Qt 只存在于前端。
 # 这里顺手检查脚本源码，发现 Qt 绑定就直接报错拦下。
 set(_reqs "")
-file(GLOB _py_files "${BUNDLE_SCRIPTS}/*.py")
+# GLOB_RECURSE：脚本按 @group 收进 scripts 的子目录树，@requires 汇总与
+# Qt 绑定拦截必须覆盖整棵树（上面的 file(COPY ... FILES_MATCHING) 本就整棵拷）。
+file(GLOB_RECURSE _py_files "${BUNDLE_SCRIPTS}/*.py")
 foreach(_f ${_py_files})
     file(READ "${_f}" _txt)
     string(REGEX MATCH "(PySide[0-9]?|PyQt[56]?|qtpy)" _qt_hit "${_txt}")
@@ -175,8 +179,8 @@ if(BUNDLE_WIN)
                                 --no-warn-script-location -q
                                 RESULT_VARIABLE _rv ERROR_VARIABLE _err)
                 if(_rv EQUAL 0)
-                    # 逐包安装：pip 对 -r 文件是全有或全无，一个包没有
-                    # wheel 会让整批依赖都装不上（实测 PyOpenColorIO）。
+                    # 逐包安装：pip 对 -r 文件是全有或全无，一个包装不上
+                    # 会让整批依赖都装不上（教训见 docs/RELEASE.md 逐包容错节）。
                     # 单包失败只影响它自己，构建继续。
                     foreach(_pkg ${_reqs})
                         execute_process(COMMAND "${_pyexe}" -m pip install
@@ -240,6 +244,42 @@ if(BUNDLE_WIN)
         if(_pip_leftovers)
             file(REMOVE ${_pip_leftovers})
         endif()
+    endif()
+
+    # ---- 6. Real-ESRGAN 预置（构建期下载 Windows 版官方二进制）----
+    # 目标机零部署：exe + models/ 直接进发行包，将来调用它的脚本开箱即用，
+    # 不要求目标机装任何东西。下载缓存在 BUNDLE_CACHE（文件名带上游版本号
+    # 20220424，天然幂等，只下一次）；下载失败与 Python 段同款容错 ——
+    # 只 WARNING 不阻塞构建，缺了只是包里没这个工具。
+    # 【仅 Windows】上游只发布 Windows 版 zip，Linux 分支不下载（暂缺）。
+    set(_rre_dir "${_out}/tools/realesrgan")
+    set(_rre_zip "${_cache}/realesrgan-ncnn-vulkan-20220424-windows.zip")
+    if(NOT EXISTS "${_rre_zip}")
+        message(STATUS "[bundle] 下载 Real-ESRGAN（一次性，约 43MB）")
+        file(DOWNLOAD
+             "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip"
+             "${_rre_zip}" SHOW_PROGRESS STATUS _dl)
+        list(GET _dl 0 _dl_code)
+        if(NOT _dl_code EQUAL 0)
+            file(REMOVE "${_rre_zip}")
+            message(WARNING "Real-ESRGAN 下载失败，发行包将不含 tools/realesrgan")
+        endif()
+    endif()
+    if(EXISTS "${_rre_zip}" AND NOT EXISTS "${_rre_dir}/realesrgan-ncnn-vulkan.exe")
+        file(REMOVE_RECURSE "${_rre_dir}")
+        file(MAKE_DIRECTORY "${_rre_dir}")
+        # CMake 4.0 起 ARCHIVE_EXTRACT 的压缩包参数改成了 INPUT 关键字（同上）。
+        if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0")
+            file(ARCHIVE_EXTRACT INPUT "${_rre_zip}" DESTINATION "${_rre_dir}")
+        else()
+            file(ARCHIVE_EXTRACT "${_rre_zip}" DESTINATION "${_rre_dir}")
+        endif()
+        # 上游 zip 的演示杂物删掉（示例输入图 x2 / 演示视频 / 自带 README）；
+        # exe、vcomp140* 运行时 dll 与 models/ 全保留 —— exe 运行要靠它们。
+        file(REMOVE "${_rre_dir}/input.jpg"
+                    "${_rre_dir}/input2.jpg"
+                    "${_rre_dir}/onepiece_demo.mp4"
+                    "${_rre_dir}/README_windows.md")
     endif()
 else()
     # ---- Linux：Qt 运行时来自系统包；Python 依赖由 run.sh 首次运行建 venv ----

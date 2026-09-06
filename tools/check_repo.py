@@ -4,11 +4,14 @@
 检查项：
   1. 文本源文件不得带 UTF-8 BOM（MSVC 工具链和部分工具会把 BOM 当内容）。
   2. 文本源文件必须能按 UTF-8 解码（防止 GBK 字面量混入导致乱码/编译错）。
-  3. core/python/scripts/*.py 禁止出现 Qt 绑定（PySide/PyQt/qtpy）。
+  3. core/python/scripts/ 树下全部 .py 禁止出现 Qt 绑定（PySide/PyQt/qtpy）。
      脚本层是纯后端，沾上 Qt 意味着 Python 环境要跟着 Qt 的版本和许可走，
      破坏"脚本跑在任意无 GUI 部署形态"的前提。这条与打包期 cmake bundle 里的
      拦截是双保险：打包检查只在构建发行包时触发，平时开发随手改脚本就能被
      本检查先拦下。
+  4. core/python/scripts/ 下每个脚本的 @group 必须与其相对 scripts 的目录
+     路径一致（根下脚本 @group 不含 /）。启动器只透传 group 字符串做
+     ListView 分组、不校验名字，分组与目录的一致性全靠这条检查兜底。
 
 用法：python tools/check_repo.py
 （AGENTS.md 约定：这类检查一律写脚本跑，不靠模型逐字核对。）
@@ -32,6 +35,9 @@ SKIP_DIRS = {"build", "output", ".git", ".cache", ".sandbox",
 # 与打包期（bundle 管线）同一个正则，两边语义保持一致，改一处必须改另一处。
 QT_BINDING_RE = re.compile(r"(PySide[0-9]?|PyQt[56]?|qtpy)")
 
+# docstring 声明块里的分组行（逐行找，取第一个命中；MULTILINE 让 ^$ 逐行生效）。
+GROUP_RE = re.compile(r"^@group\s+(.+?)\s*$", re.MULTILINE)
+
 # 脚本实体目录（monorepo 后端契约，见 docs/ARCHITECTURE.md）。
 SCRIPTS_DIR = ROOT / "core" / "python" / "scripts"
 
@@ -50,7 +56,7 @@ def check_qt_bindings(problems: list[str]) -> None:
     """
     if not SCRIPTS_DIR.is_dir():
         return
-    for p in sorted(SCRIPTS_DIR.glob("*.py")):
+    for p in sorted(SCRIPTS_DIR.rglob("*.py")):
         text = p.read_text(encoding="utf-8")
         hit = QT_BINDING_RE.search(text)
         if hit:
@@ -58,6 +64,38 @@ def check_qt_bindings(problems: list[str]) -> None:
                 f"{p.relative_to(ROOT)}: 引用了 Qt 绑定（{hit.group(1)}）。"
                 "脚本层是纯后端，禁止依赖 Qt —— 否则 Python 环境就要跟着 "
                 "Qt 的版本和许可走了（docs/SCRIPT_SPEC.md 硬规则 0）。")
+
+
+def check_group_dir_consistency(problems: list[str]) -> None:
+    """检查项 4：@group 与 scripts 目录结构一致。
+
+    分组名可用 / 表层级（如 Image/Format Convert），约定与脚本相对
+    core/python/scripts/ 的目录路径一致；在 scripts 根下的脚本 group 不含 /。
+    启动器把 group 当不透明字符串透传给 ListView 分组显示，不做名字校验，
+    这条一致性约定靠本检查兜底。
+    """
+    if not SCRIPTS_DIR.is_dir():
+        return
+    for p in sorted(SCRIPTS_DIR.rglob("*.py")):
+        rel = p.relative_to(SCRIPTS_DIR).as_posix()
+        hit = GROUP_RE.search(p.read_text(encoding="utf-8"))
+        actual = hit.group(1) if hit else None
+        if "/" in rel:
+            expected = rel.rsplit("/", 1)[0]
+            ok = actual == expected
+        else:
+            expected = None
+            ok = actual is not None and "/" not in actual
+        if ok:
+            continue
+        want = expected if expected is not None \
+            else "不含 / 的分组名（脚本在 scripts 根）"
+        shown = actual if actual is not None else "(未找到 @group 行)"
+        problems.append(
+            f"{p.relative_to(ROOT)}: @group 与目录不一致"
+            f"（实际 \"{shown}\"，期望 \"{want}\"）。"
+            "约定：新脚本放进哪个目录，@group 就写到那个相对路径"
+            "（docs/SCRIPT_SPEC.md @group 键）。")
 
 
 def main() -> int:
@@ -77,6 +115,7 @@ def main() -> int:
             problems.append(f"{p.relative_to(ROOT)}: 不是合法 UTF-8（{e}）")
 
     check_qt_bindings(problems)
+    check_group_dir_consistency(problems)
 
     for line in problems:
         print(line)

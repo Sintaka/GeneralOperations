@@ -4,7 +4,7 @@
 # 为什么超级构建放根：monorepo 的边界不靠仓库物理隔离，靠三件事——
 #   1. 目录（ui/ 只管前端，core/ 只管后端）；
 #   2. 依赖方向（ui → core 单向，由 add_subdirectory 的顺序和变量流向表达）；
-#   3. 本文件这个单点：前端/后端选择、输出命名、发行 zip 命名全在这里定义，
+#   3. 本文件这个单点：前端选择、输出命名、发行 zip 命名全在这里定义，
 #      子目录只消费 GO_* 变量，不允许自己再发明一套命名。
 # 分层与契约的完整说明见 docs/ARCHITECTURE.md。
 # =============================================================================
@@ -15,7 +15,7 @@ cmake_minimum_required(VERSION 3.21)
 # 否则"改一处版本号"就变成"改 N 处"，必然漏改。
 # 0.2.000 标记 monorepo 重构起点（旧 Qt5 单仓仓库止于 0.1.00x）。
 project(GeneralOperations
-    VERSION 0.2.000
+    VERSION 0.2.001
     DESCRIPTION "统一的脚本启动器 monorepo（多前端 x 多后端）"
     LANGUAGES CXX
 )
@@ -29,27 +29,29 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # 各子目录重复声明。
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
-# ---- 前端/后端选择（monorepo 的两个总开关）----
-# 默认 qt5 + python 是唯一完整可用的组合；其余取值是占位，见各分支的说明。
+# ---- 前端选择（monorepo 的总开关）----
+# 默认 qt5 是唯一完整可用的前端；其余取值是占位，见各分支的说明。
+# 后端不再是可选项：core/ 下两个内核无条件一起构建（见下），产物与发行
+# 命名只区分前端、不区分后端，没有后端开关这回事。
 set(GO_FRONTEND "qt5" CACHE STRING "启动器前端：qt5 | qt6.8lts(占位) | tauri2(占位)")
 set_property(CACHE GO_FRONTEND PROPERTY STRINGS qt5 qt6.8lts tauri2)
-set(GO_BACKEND "python" CACHE STRING "脚本后端：python | cpp(占位)")
-set_property(CACHE GO_BACKEND PROPERTY STRINGS python cpp)
 
-# ---- 后端：脚本实体 ----
+# ---- 内核：脚本资产 ----
 # 无条件 add_subdirectory：无论前端选什么都得拿到脚本目录路径；而且"脚本在
 # 哪里"是 core/python 的自述，由它导出（GO_PYTHON_SCRIPTS_DIR），根不写死
 # 路径——将来脚本换目录只动 core/python 一处。
 add_subdirectory(core/python)
 
-# 根再把它规范化成后端无关的名字：前端（ui/qt5 等）只认识 GO_CORE_SCRIPTS_DIR，
-# 不需要知道脚本当前由哪种后端提供。将来 GO_BACKEND=cpp 时只需在这里改指向。
+# 根再把它规范化成内核无关的名字：前端（ui/qt5 等）只认识 GO_CORE_SCRIPTS_DIR。
+# 后端不再是可选项——core/python 与 core/cpp 都无条件 add_subdirectory 一起
+# 构建、一起进发行，GO_CORE_SCRIPTS_DIR 只是指向脚本资产的指针（当前由
+# core/python 提供），指向始终由根这单点维护。
 set(GO_CORE_SCRIPTS_DIR "${GO_PYTHON_SCRIPTS_DIR}")
 
 # ---- 输出命名规则（单点定义，见 docs/ARCHITECTURE.md「关键契约」）----
-# bundle 目录带 前端-后端 段：不同组合的产物落到各自子目录，互不覆盖；
+# bundle 目录带 前端 段：不同前端的产物落到各自子目录，互不覆盖；
 # 带 x64 段：为将来可能的非 Windows/非 64 位产物留位。
-set(GO_BUNDLE_DIR "${CMAKE_SOURCE_DIR}/output/x64-${GO_FRONTEND}-${GO_BACKEND}")
+set(GO_BUNDLE_DIR "${CMAKE_SOURCE_DIR}/output/x64-${GO_FRONTEND}")
 
 # GO_ZIP_FILE 只在单配置（CMAKE_BUILD_TYPE 非空）下定义：
 # release_zip 目标要按配置算 zip 名，多配置生成器（VS/Ninja Multi-Config）一次
@@ -58,23 +60,23 @@ set(GO_BUNDLE_DIR "${CMAKE_SOURCE_DIR}/output/x64-${GO_FRONTEND}-${GO_BACKEND}")
 if(CMAKE_BUILD_TYPE)
     string(TOLOWER "${CMAKE_BUILD_TYPE}" _go_conf_lower)
     set(GO_ZIP_FILE
-        "${CMAKE_SOURCE_DIR}/output/GeneralOperations-${PROJECT_VERSION}_x64-${GO_FRONTEND}-${GO_BACKEND}-${_go_conf_lower}.zip")
+        "${CMAKE_SOURCE_DIR}/output/GeneralOperations-${PROJECT_VERSION}_x64-${GO_FRONTEND}-${_go_conf_lower}.zip")
 else()
     message(WARNING
         "CMAKE_BUILD_TYPE 为空（多配置生成器暂不支持），GO_ZIP_FILE 未定义，"
         "release_zip 目标不可用。请使用 CMakePresets.json 里的 Ninja preset。")
 endif()
 
-# ---- 后端：C++ 内核（占位）----
+# ---- 内核：C++（占位）----
 # 无条件 add_subdirectory：它的测试目标 go_core_cpp_tests 进默认构建，
 # 保证占位代码一旦开始实现就有测试挂载点，不需要改根。
 add_subdirectory(core/cpp)
 
 # ---- 前端分支 ----
-# 为什么前端走分支而后端无条件：前端决定整个 GUI 目标树（Qt 版本、QML 模块、
-# windeployqt 差异），一次只能构建一个；后端目前只是"脚本文件 + 清单校验"，
-# 与前端正交。未来接入新前端只需在这里加一个分支——这就是 monorepo 多前端的
-# 扩展点，详见 docs/ARCHITECTURE.md「新增一个前端」。
+# 为什么前端走分支而内核无条件：前端决定整个 GUI 目标树（Qt 版本、QML 模块、
+# windeployqt 差异），一次只能构建一个；内核只是"脚本资产 + 纯函数"，与前端
+# 正交、无条件一起构建。未来接入新前端只需在这里加一个分支——这就是
+# monorepo 多前端的扩展点，详见 docs/ARCHITECTURE.md「新增一个前端」。
 if(GO_FRONTEND STREQUAL "qt5")
     add_subdirectory(ui/qt5)
 elseif(GO_FRONTEND STREQUAL "qt6.8lts")
@@ -91,10 +93,9 @@ else()
         "未知的 GO_FRONTEND='${GO_FRONTEND}'。可选：qt5 | qt6.8lts | tauri2。")
 endif()
 
-# ---- 配置摘要：configure 结束时一眼核对四个关键值 ----
+# ---- 配置摘要：configure 结束时一眼核对关键值 ----
 message(STATUS "----------------------------------------------------------")
 message(STATUS "[GO] 前端 GO_FRONTEND      = ${GO_FRONTEND}")
-message(STATUS "[GO] 后端 GO_BACKEND       = ${GO_BACKEND}")
 message(STATUS "[GO] 脚本目录 GO_CORE_SCRIPTS_DIR = ${GO_CORE_SCRIPTS_DIR}")
 message(STATUS "[GO] 产物目录 GO_BUNDLE_DIR = ${GO_BUNDLE_DIR}")
 if(DEFINED GO_ZIP_FILE)

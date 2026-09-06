@@ -32,8 +32,8 @@ tauri cli），本目录刻意不放 `CMakeLists.txt`，根分支没有可 add_s
 - **不走 CMake 构建，根 CMake 只拦不建。** 前端 npm、Rust 走 cargo、壳用
   tauri cli，根 `CMakePresets.json` 不为它加 preset；`.vscode/tasks.json`
   接入时用 npm/cargo 命令实现同等的配置 / 构建 / 运行任务组。发行装配命名
-  仍遵守根契约（装配落 `output/x64-tauri2-<后端>/<配置>/`，zip 为
-  `GeneralOperations-<版本>_x64-tauri2-<后端>-<配置>.zip`，即
+  仍遵守根契约（装配落 `output/x64-tauri2/<配置>/`，zip 为
+  `GeneralOperations-<版本>_x64-tauri2-<配置>.zip`，即
   `GO_BUNDLE_DIR` / `GO_ZIP_FILE` 的 tauri2 取值），装配工具从 `bundle.cmake`
   换成 tauri 侧脚本——"产物命名是根单点"的语义不变，只是实现换了。
 

@@ -23,7 +23,7 @@ D:\code\dev\qt\GeneralOperations-Qt5      第二代：Qt5 QML 启动器单仓（
 
 ```
 GeneralOperations/
-├── CMakeLists.txt        # 超级构建根：前端/后端选择、GO_* 契约、输出与 zip 命名；全仓库唯一 project()
+├── CMakeLists.txt        # 超级构建根：前端选择、GO_* 契约、输出与 zip 命名；全仓库唯一 project()
 ├── CMakePresets.json     # 全部 preset 收敛在此（qt5-mingw-debug 为默认）
 ├── AGENTS.md             # AI 协作约定：收尾流程、版本 bump、提交规范
 ├── .vscode/tasks.json    # VS Code 任务：配置 / 生成 / 运行 / 发行 zip / 单测 / 检查
@@ -54,7 +54,7 @@ GeneralOperations/
 
 ```
 cmake --preset qt5-mingw-debug              # 配置
-cmake --build --preset qt5-mingw-debug      # 构建（POST_BUILD 自动装配 output/x64-qt5-python/Debug）
+cmake --build --preset qt5-mingw-debug      # 构建（POST_BUILD 自动装配 output/x64-qt5/Debug）
 build/qt5-mingw-debug/GeneralOperationsLauncher.exe    # 运行
 ```
 
@@ -69,8 +69,8 @@ cmake --build --preset qt5-mingw-release --target release_zip
 | 产物 | 路径 |
 |---|---|
 | 构建目录 | `build/<preset>/` |
-| 自包含发行装配 | `output/x64-<前端>-<后端>/<Config>/`，默认组合即 `output/x64-qt5-python/Release/` |
-| 发行 zip | `output/GeneralOperations-<版本>_x64-<前端>-<后端>-<release\|debug>.zip`（版本取根 `project(... VERSION)`，如 `GeneralOperations-0.2.000_x64-qt5-python-release.zip`） |
+| 自包含发行装配 | `output/x64-<前端>/<Config>/`，默认前端即 `output/x64-qt5/Release/` |
+| 发行 zip | `output/GeneralOperations-<版本>_x64-<前端>-<release\|debug>.zip`（版本取根 `project(... VERSION)`，如 `GeneralOperations-0.2.000_x64-qt5-release.zip`） |
 
 发行装配是**自包含目录**：整体拷走或压 zip 后即可分发，不依赖开发机的任何
 绝对路径；布局、内嵌 Python 与目标机注意事项见 `docs/RELEASE.md`。

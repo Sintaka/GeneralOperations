@@ -23,7 +23,7 @@
   详见 docs/ARCHITECTURE.md。
 - **新前端/后端接入**：步骤与契约见 docs/ARCHITECTURE.md
   （「新增一个前端」「新增一个后端」两节），先读再动手。
-- **发行打包**：见 docs/RELEASE.md（output/x64-<前端>-<后端>/<配置>/ 自包含
+- **发行打包**：见 docs/RELEASE.md（output/x64-<前端>/<配置>/ 自包含
   装配 + 内嵌 Python + zip 命名规则）。
 - **脚本契约**：见 docs/SCRIPT_SPEC.md（脚本 docstring 头声明块，脚本实体在
   `core/python/scripts/`，前端与打包管线共同消费，启动器只读不解析代码）。

@@ -1,8 +1,8 @@
 # 打包与发行（output/ 发行装配）
 
 > 每次构建后，POST_BUILD 的 bundle 管线把产物装配成
-> `output/x64-<前端>-<后端>/<Debug|Release>/`（默认组合即
-> `output/x64-qt5-python/Release/`）——**自包含目录**，整体拷走或压 zip 后即可
+> `output/x64-<前端>/<Debug|Release>/`（qt5 即
+> `output/x64-qt5/Release/`）——**自包含目录**，整体拷走或压 zip 后即可
 > 分发，不依赖开发机的任何绝对路径（构建期的 build/ 目录才依赖本机 Qt）。
 > 管线脚本由前端持有（qt5 为 `ui/qt5/cmake/bundle.cmake`，POST_BUILD 以
 > `cmake -P` 调用），入参契约见 `docs/ARCHITECTURE.md`「关键契约」。
@@ -10,22 +10,23 @@
 > 本文改写自第二代旧仓库的 docs/RELEASE.md；路径与命名已按 monorepo 契约
 > （`GO_BUNDLE_DIR` / `GO_ZIP_FILE`）更新，管线行为细节保持不变。
 
-## 目录布局（Windows，qt5 + python 默认组合）
+## 目录布局（Windows，qt5）
 
 ```
-output/x64-qt5-python/Release/
+output/x64-qt5/Release/
 ├── GeneralOperationsLauncher.exe   # 图标来自 ui/qt5/src/assets/app.ico（ui/qt5/tools/gen_icon.py 生成）
 ├── qt.conf                  # Prefix=. —— 相对路径，指向自身
 ├── Qt5*.dll / lib*.dll      # windeployqt 装配的 Qt + MinGW 运行时
 ├── platforms/ 及各 QML 模块目录  # 平台插件 + QML 模块（VirtualKeyboard 已剪除）
 ├── scripts/                 # Python 脚本（来自 GO_CORE_SCRIPTS_DIR = core/python/scripts）
 ├── requirements.txt         # 由各脚本 @requires 行自动汇总生成
+├── tools/realesrgan/        # Real-ESRGAN 预置（exe + models/，构建期下载，见下文专节）
 └── python/                  # 内嵌 Python 运行时（见下）
     ├── python.exe  python312.zip  ...
     └── Lib/site-packages/   # requirements.txt 装好的依赖
 ```
 
-Linux 布局相同（同在 `output/x64-qt5-python/<Config>/`），但 Qt 走系统包，
+Linux 布局相同（同在 `output/x64-qt5/<Config>/`），但 Qt 走系统包，
 没有 python/ —— 换成 run.sh + requirements.txt（见下）。
 
 ## bundle 管线入参（monorepo 的变化点）
@@ -59,17 +60,31 @@ POST_BUILD 调用 bundle 脚本时，第二代仓库的单参数 `BUNDLE_SRC`（
 启动器选解释器的顺序：内嵌运行时 → 系统解释器；子进程环境强制
 PYTHONUTF8=1 并清除用户 PYTHONPATH，依赖一律以本包 site-packages 为准。
 
+## Real-ESRGAN 预置（Windows，构建期下载）
+
+- **来源**：上游官方二进制包
+  [realesrgan-ncnn-vulkan-20220424-windows.zip](https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip)
+  （v0.2.5.0，zip 约 43MB，展开为 exe + models/ + vcomp140 运行时 dll）。
+- **缓存与增量**：zip 缓存在 `BUNDLE_CACHE`（仓库根 `.cache/`，文件名带上游
+  版本号 20220424，天然幂等，只下一次）；装配目录 `tools/realesrgan/` 里
+  exe 已存在就跳过展开。展开时删掉上游的演示杂物（input.jpg / input2.jpg /
+  onepiece_demo.mp4 / README_windows.md），exe、dll 与 models/ 全保留。
+- **失败容错**：与 Python 段同款——下载失败只 WARNING 不阻塞构建，
+  发行包里只是没这个工具；删掉 `tools/realesrgan/` 重跑构建即可自愈。
+- **Linux 暂缺**：上游只发布 Windows 版 zip，Linux 分支不下载不展开；
+  出现官方 Linux 二进制后再接。
+
 ## 使用
 
 （全部从仓库根执行）
 
 ```
-cmake --build --preset qt5-mingw-release        # 构建并装配 output/x64-qt5-python/Release
+cmake --build --preset qt5-mingw-release        # 构建并装配 output/x64-qt5/Release
 cmake --build --preset qt5-mingw-release --target release_zip   # 压成发行 zip
-cmake --build --preset qt5-mingw-debug          # output/x64-qt5-python/Debug 同理
+cmake --build --preset qt5-mingw-debug          # output/x64-qt5/Debug 同理
 ```
 
-发行 zip：`output/GeneralOperations-<版本>_x64-qt5-python-<release|debug>.zip`
+发行 zip：`output/GeneralOperations-<版本>_x64-qt5-<release|debug>.zip`
 （版本取根 `project(... VERSION)`，命名规则 `GO_ZIP_FILE` 属于根契约，见
 `docs/ARCHITECTURE.md`「关键契约」）。目标机解压到任意目录直接运行（Windows）；
 Linux 解压后 `./run.sh`。
@@ -79,8 +94,10 @@ Linux 解压后 `./run.sh`。
 
 ## 逐包安装的容错
 
-pip 对清单文件（`-r requirements.txt`）是全有或全无——一个包没有 wheel 会让
-整批依赖装不上（实测 PyOpenColorIO 无 cp312 wheel）。所以 Windows bundle 和
+pip 对清单文件（`-r requirements.txt`）是全有或全无——一个包装不上会让整批
+依赖都装不上。最初的教训：脚本头写了 `PyOpenColorIO`，但 PyPI 上从来没有这个
+发行名（不是缺 wheel，是包名压根不存在）——真正的发行名是 `OpenColorIO`，
+它提供 cp312 与 manylinux wheel；@requires 包名已修正。所以 Windows bundle 和
 Linux run.sh 都是**逐包安装**：单包失败只影响它自己的脚本，其余照常。
 
 ## Linux 目标机系统依赖
@@ -100,8 +117,8 @@ sudo apt install libqt5quick5 libqt5qml5 libqt5qmlmodels5 \
   先退出旧实例再构建。
 - pip 安装失败（断网/个别包无 wheel）不阻塞构建：运行器会回退系统
   Python，状态区会显示具体脚本缺什么。
-- 发行装配只认 `output/x64-<前端>-<后端>/<Config>/` 这一个命名：换前端/后端
-  组合时目录名跟着 `GO_BUNDLE_DIR` 走，不要手工搬动产物。
+- 发行装配只认 `output/x64-<前端>/<Config>/` 这一个命名：换前端时目录名跟着
+  `GO_BUNDLE_DIR` 走，不要手工搬动产物。
 
 ## 产物审计与剪除（bundle 管线末尾）
 

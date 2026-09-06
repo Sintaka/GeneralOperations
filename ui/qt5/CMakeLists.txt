@@ -197,13 +197,13 @@ if(WIN32)
     )
 endif()
 
-# ---- bundle: 把产物装配成自包含的 output/x64-<前端>-<后端>/<配置>/（每次构建后增量执行）----
+# ---- bundle: 把产物装配成自包含的 output/x64-<前端>/<配置>/（每次构建后增量执行）----
 #
 # 与上面 copy-runtime 的区别：copy-runtime 服务开发期（qt.conf 指回本机
 # Qt 安装目录，绝对路径），bundle 服务发行 —— windeployqt 装配 Qt 运行时、
 # qt.conf 相对化、scripts/ 拷入、内嵌 Python（Windows）/run.sh（Linux）。
-# 目录带 前端-后端-x64 段（GO_BUNDLE_DIR，根 CMakeLists 单点定义）：不同前端/后端
-# 组合的产物落到各自子目录，互不覆盖。
+# 目录带 前端-x64 段（GO_BUNDLE_DIR，根 CMakeLists 单点定义）：不同前端的产物
+# 落到各自子目录，互不覆盖。
 # 成品目录整体拷走或压 zip 后即可分发，细节与布局见 docs/RELEASE.md。
 if(WIN32)
     set(_bundle_win 1)
@@ -232,10 +232,10 @@ add_custom_command(TARGET GeneralOperationsLauncher POST_BUILD
     VERBATIM
 )
 
-# ---- release_zip: 把 output/x64-<前端>-<后端>/<配置> 压成发行 zip ----
+# ---- release_zip: 把 output/x64-<前端>/<配置> 压成发行 zip ----
 # cmake -E tar 走 libarchive，写 zip 不需要外部工具。
 # zip 路径由根 CMakeLists 单点定义（GO_ZIP_FILE），命名规则：
-#   GeneralOperations-<版本>_x64-<前端>-<后端>-<release|debug>.zip
+#   GeneralOperations-<版本>_x64-<前端>-<release|debug>.zip
 # （末段是 CMAKE_BUILD_TYPE 的小写）。GO_ZIP_FILE 仅单配置（CMAKE_BUILD_TYPE
 # 非空）下定义，多配置生成器下 release_zip 不可用——见根 CMakeLists 的守卫说明。
 # 用法（仓库根执行）：cmake --build --preset qt5-mingw-release --target release_zip

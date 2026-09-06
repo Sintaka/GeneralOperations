@@ -35,7 +35,7 @@ MSVC 作为备选保留（产物小约 10MB），但它需要在 VSCode 里选 M
 构建产物两份：
 
 - **开发期** `build/<preset>/` —— exe + Qt 运行时 dll + qt.conf（绝对路径指回本机 Qt 安装，仅开发期用）。
-- **发行装配** `output/x64-qt5-python/<Debug|Release>/` —— bundle 管线每次构建后增量装配：windeployqt 收 Qt 运行时与 QML 模块、qt.conf 相对化、内核脚本拷到 exe 旁 `scripts/`、内嵌 Python（Windows）/run.sh（Linux）。整目录拷走即可分发，细节见 [`docs/RELEASE.md`](../../docs/RELEASE.md)。
+- **发行装配** `output/x64-qt5/<Debug|Release>/` —— bundle 管线每次构建后增量装配：windeployqt 收 Qt 运行时与 QML 模块、qt.conf 相对化、内核脚本拷到 exe 旁 `scripts/`、内嵌 Python（Windows）/run.sh（Linux）。整目录拷走即可分发，细节见 [`docs/RELEASE.md`](../../docs/RELEASE.md)。
 
 分发：
 
@@ -44,7 +44,7 @@ cmake --build --preset qt5-mingw-deploy    # release + windeployqt 收集 dll �
 cmake --build --preset qt5-mingw-release --target release_zip
 ```
 
-发行 zip：`output/GeneralOperations-<版本>_x64-qt5-python-<release|debug>.zip`（版本号唯一来源是根 CMakeLists 的 `project(... VERSION ...)`，zip 名由根定义的 `GO_ZIP_FILE` 决定）。
+发行 zip：`output/GeneralOperations-<版本>_x64-qt5-<release|debug>.zip`（版本号唯一来源是根 CMakeLists 的 `project(... VERSION ...)`，zip 名由根定义的 `GO_ZIP_FILE` 决定）。
 
 ## 改了 QML 之后
 

@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 @name        EXR to PNG (Large / 4K)
-@group       Image
+@group       Image/Format Convert
 @desc        EXR 场景线性转 Display sRGB(ACES)，流式降采样到指定像素上限后输出 PNG，为 8K/16K 大图设计，绝不整图载入内存
 @accepts     file
 @ext         .exr
 @multi       true
-@requires    numpy PyOpenColorIO OpenEXR Imath Pillow
+@requires    numpy OpenColorIO OpenEXR Imath Pillow
 
 @param  target    : int  : 4096 : 输出长边像素上限                : 16..65536
 @param  png_level : int  : 1    : PNG deflate 压缩等级             : 0..9

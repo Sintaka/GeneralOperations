@@ -27,7 +27,7 @@
       "group": { "kind": "build", "isDefault": true },
       "problemMatcher": ["$gcc"],
       "presentation": { "reveal": "always", "panel": "shared", "clear": true },
-      "detail": "配置（如需）+ 编译 + POST_BUILD 自动装配 output/x64-qt5-python/Debug（Qt 运行时 + scripts + 内嵌 Python）"
+      "detail": "配置（如需）+ 编译 + POST_BUILD 自动装配 output/x64-qt5/Debug（Qt 运行时 + scripts + 内嵌 Python）"
     },
     {
       "label": "运行 (qt5-debug)",
@@ -59,14 +59,14 @@
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": ["$gcc"],
       "presentation": { "reveal": "always", "panel": "shared", "clear": true },
-      "detail": "配置（如需）+ 构建 Release + 装配 output/x64-qt5-python/Release + 压成 output/ 下的发行 zip"
+      "detail": "配置（如需）+ 构建 Release + 装配 output/x64-qt5/Release + 压成 output/ 下的发行 zip"
     },
     {
       "label": "运行 (qt5 发行包)",
       "type": "shell",
-      "command": "${workspaceFolder}/output/x64-qt5-python/Release/GeneralOperationsLauncher.exe",
+      "command": "${workspaceFolder}/output/x64-qt5/Release/GeneralOperationsLauncher.exe",
       // 发行包是自包含目录，直接在包内启动，顺带验证"拷到别的目录也能跑"的前提。
-      "options": { "cwd": "${workspaceFolder}/output/x64-qt5-python/Release" },
+      "options": { "cwd": "${workspaceFolder}/output/x64-qt5/Release" },
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "dedicated" },
       "detail": "直接运行 output 自包含产物（需先跑过'发行 zip (qt5-release)'或手动构建过 qt5-mingw-release）"

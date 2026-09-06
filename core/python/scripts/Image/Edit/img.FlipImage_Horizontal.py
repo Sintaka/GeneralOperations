@@ -1,6 +1,6 @@
 """
 @name        Flip Image Horizontal
-@group       Image
+@group       Image/Edit
 @desc        水平翻转图片，输出为同目录下 *_flipped 后缀的新文件（含 EXR 支持）
 @accepts     file
 @ext         .png .jpg .jpeg .bmp .gif .tiff .tif .webp .ico .jfif .exr

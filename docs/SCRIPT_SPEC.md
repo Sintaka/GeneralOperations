@@ -9,7 +9,7 @@
 ```python
 """
 @name        Resize to JPEG
-@group       Image
+@group       Image/ReSize
 @desc        等比缩放长边到指定像素并转为 JPEG，输出到源目录：原名_<长边像素>px.jpg，同名直接覆盖
 @accepts     file
 @ext         .jpg .jpeg .png .bmp .gif .tiff .tif .webp .ico .jfif
@@ -27,7 +27,7 @@
 | 键 | 必填 | 说明 |
 |---|---|---|
 | `@name` | ✅ | Outliner 里显示的名字 |
-| `@group` | ✅ | Outliner 分组。当前用 `Image` / `Geometry` / `System` |
+| `@group` | ✅ | Outliner 分组，可用 `/` 表层级（如 `Image/Format Convert`）。**约定与 `core/python/scripts/` 下的目录结构一致**：脚本放进哪个目录，`@group` 就写到那个相对路径；留在 `scripts/` 根的脚本 group 不含 `/`（`tools/check_repo.py` 有检查兜底） |
 | `@desc` | ✅ | 一句话说明，显示在参数面板顶部 |
 | `@accepts` | ✅ | `file` / `dir` / `both` —— 决定拖拽时接受什么 |
 | `@ext` | | 空格分隔的扩展名白名单，带点，小写。省略 = 不限 |
