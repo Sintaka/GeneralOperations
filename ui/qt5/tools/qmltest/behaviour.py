@@ -107,7 +107,16 @@ Item {
                 subTitle: it.subRowTitle,
                 subHeight: it.subRowHeight,
                 subBadge: it.subRowBadge,
-                subBadgeVisible: it.subRowBadgeVisible
+                subBadgeVisible: it.subRowBadgeVisible,
+                // 防回归锚点：高度归零的 delegate 靠 delegate clip + 子行
+                // clip 保证"什么都不画、不收事件"。delegate 根节点的
+                // visible 被 ListView 命令式管理、绑定会被杀（2026-09-07
+                // 实测，见 positioner 踩坑记录），所以不能也不需要用
+                // visible 门；subRow 必须自 clip（carrier delegate 收起后
+                // 仍可见，子分类行高度归零时内容要被裁掉）。
+                delegateClip: it.clip,
+                delegateHeight: it.height,
+                subClip: it.subRowClip
             });
         }
         return out;
@@ -261,8 +270,6 @@ def expected_rows(open_majors, open_subs):
         rows.append((g, mj_title, mj_h, mj_badge, mj_vis,
                      sb_title, sb_h, sb_badge, sb_vis))
     return rows
-
-
 def qml_headers():
     """headers() result as plain Python data.
 
@@ -305,6 +312,12 @@ def check_headers(label, open_majors, open_subs, check_heights=True):
                 problems.append(f"{w_section}: majorHeight={h['majorHeight']!r} want {mj_h}")
             if abs(float(h["subHeight"]) - sb_h) > 0.5:
                 problems.append(f"{w_section}: subHeight={h['subHeight']!r} want {sb_h}")
+        # 防回归：零高度 delegate 必须靠 clip 保证不画不收（delegate 根的
+        # visible 被 ListView 接管，靠不住），subRow 必须自 clip。
+        if not h["delegateClip"]:
+            problems.append(f"{w_section}: delegate root clip is false")
+        if not h["subClip"]:
+            problems.append(f"{w_section}: subRow.clip is false")
     if problems:
         print(f"  [FAIL] {label}")
         for p in problems:

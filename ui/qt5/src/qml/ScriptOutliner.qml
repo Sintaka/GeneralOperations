@@ -200,6 +200,7 @@ Item {
             readonly property real subRowHeight: subRow.visible ? subRow.height : 0
             readonly property string subRowBadge: subRow.visible ? subCount.text : ""
             readonly property bool subRowBadgeVisible: subRow.visible && subCount.visible
+            readonly property bool subRowClip: subRow.clip
 
             // ---- 本 delegate 承担哪几行 ----
             readonly property string major: root.groupMajor(section)
@@ -224,7 +225,18 @@ Item {
                     + (subRow.visible ? subRow.height : 0);
                 return rows > 0 ? rows + Theme.groupGap : 0;
             }
-            // 高度动画到 0 的过程中内容会溢出到相邻行上面，clip 是必须的。
+            // 高度为零的 delegate 必须"什么都不画、什么都不收"（收起大类
+            // 后子分类内容是居中锚定的，不裁掉会探进大类头可视带，2026-09-07
+            // 几何探针实测：文本 y=25..43 对可视带 0..38）。
+            // 【为什么不用 visible: height > 0】两个实测死路：
+            //   1. 写成读 height 的形式，与本 height 绑定（要读子行的
+            //      visible/height）构成绑定环，QML 掐断绑定后状态更糟；
+            //   2. 改成重算行高的无环写法也没用 —— ListView 会命令式写
+            //      delegate 根节点的 visible（绑定被杀，探针实测
+            //      hasVisibleRow=false 而 visible 仍为 true）。
+            // 所以真正的防线是 clip：可视带为空矩形（高度归零）时子项一个
+            // 像素都画不出来；零高度 MouseArea 也不参与命中测试。详见
+            // docs/pitfalls/2026-09-06-positioner-invisible-child-height.md。
             clip: true
 
             Column {
@@ -329,6 +341,14 @@ Item {
                     // （System）收起时 delegate 会白占 28px。
                     height: sectionRoot.hasSub && sectionRoot.majorExpanded
                         ? Theme.rowSubGroupHeight : 0
+                    // 第二道防：carrier delegate 收起大类后自身仍可见
+                    // （大类头行还在），本行高度归零但内容是居中锚定的，
+                    // 不 clip 的话图标/文字的上半截会探进大类头可视带
+                    // （几何探针实测：文本 y=25..43 对 delegate 可视带 0..38）。
+                    // clip 让内容随高度动画被裁掉，归零后什么都不画。
+                    // 鼠标天然安全：subMouse 随本行高度一起归零，零高度
+                    // MouseArea 不参与命中测试（clip 不挡事件，但这里无需它挡）。
+                    clip: true
                     radius: Theme.radius
                     color: subMouse.containsMouse ? Theme.fillHover : "transparent"
 

@@ -15,7 +15,7 @@ cmake_minimum_required(VERSION 3.21)
 # 否则"改一处版本号"就变成"改 N 处"，必然漏改。
 # 0.2.000 标记 monorepo 重构起点（旧 Qt5 单仓仓库止于 0.1.00x）。
 project(GeneralOperations
-    VERSION 0.2.002
+    VERSION 0.2.003
     DESCRIPTION "统一的脚本启动器 monorepo（多前端 x 多后端）"
     LANGUAGES CXX
 )
