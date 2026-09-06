@@ -4,6 +4,10 @@
 **img**（图像）两类处理。左侧选脚本、右侧调参数、拖文件进去执行；脚本用
 Python，Python 环境由启动器托管，不碰系统 Python。
 
+[![GitHub Roast 评分徽章](https://ghfind.com/api/badge/sintaka)](https://ghfind.com/u/sintaka?ref=badge)
+
+[![ghfind card](https://ghfind.com/api/card/sintaka?theme=light&variant=work&qr=1)](https://ghfind.com/u/sintaka)
+
 ## 血统
 
 三代仓库，一条主线：把散装脚本收口成一个启动器（完整决策与脚本映射见
