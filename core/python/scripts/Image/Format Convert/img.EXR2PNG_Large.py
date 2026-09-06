@@ -9,7 +9,7 @@
 @multi       true
 @requires    numpy OpenColorIO OpenEXR Imath Pillow
 
-@param  target    : int  : 4096 : 输出长边像素上限                : 16..65536
+@param  target    : int  : 4096 : 输出长边像素上限                : 8..16384
 @param  png_level : int  : 1    : PNG deflate 压缩等级             : 0..9
 @param  threads   : int  : 0    : 线程数(0=自动,min(CPU,8))        : 0..64
 @param  max_mem   : int  : 0    : 像素缓冲内存预算 MB(0=自动,可用内存70%) : 0..1048576

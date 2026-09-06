@@ -122,6 +122,31 @@ Item {
         return out;
     }
 
+    // ---- geometry stack probe (section relayout regression, 2026-09-07) ----
+    // Qt 5.15 的 ListView 不把 section delegate 的高度变化当作重排触发器，
+    // 折叠后下方的 section/item 会停在旧 y（重叠或空洞），contentHeight 也
+    // 不重算。ScriptOutliner 用 criteria 重触发修复；这里把每个非零高
+    // delegate 的 (kind, key, y, h) 原样带回，Python 侧按期望栈逐位断言
+    // "无重叠、无空洞、contentHeight 正确"。零高度 delegate 不占位，
+    // 过滤掉再比。
+    function stack() {
+        var l = findList();
+        if (!l || !l.contentItem)
+            return [];
+        var out = [];
+        var items = l.contentItem.children;
+        for (var i = 0; i < items.length; ++i) {
+            var it = items[i];
+            if (it.objectName === "sectionHeader")
+                out.push({ tag: "SEC", key: it.headerSection, y: it.y, h: it.height });
+            else if (it.objectName === "scriptRow")
+                out.push({ tag: "ROW", key: it.rowGroup, y: it.y, h: it.height });
+        }
+        if (l.footerItem)
+            out.push({ tag: "FOOTER", key: "", y: l.footerItem.y, h: l.footerItem.height });
+        return out;
+    }
+
     // Identity probe: stash the current map, then report whether the property
     // still points at that same object after a toggle. If toggleGroup mutated
     // in place instead of reassigning, bindings would never re-evaluate.
@@ -270,6 +295,83 @@ def expected_rows(open_majors, open_subs):
         rows.append((g, mj_title, mj_h, mj_badge, mj_vis,
                      sb_title, sb_h, sb_badge, sb_vis))
     return rows
+def expected_stack(open_majors, open_subs):
+    """The visual stack as (kind, key, height) top-to-bottom.
+
+    kind is "SEC" (section delegate), "ROW" (script row) or "FOOTER". Same
+    math as expected_height(), but positional: the section relayout probe
+    (check_stack) walks this and asserts every delegate's y/height so a
+    stale Qt 5.15 section layout (overlap or hole below a folded section)
+    cannot pass unnoticed.
+    """
+    blocks = []
+    first_seen = set()
+    for g in SECTIONS:
+        m = major_of(g)
+        first = m not in first_seen
+        if first:
+            first_seen.add(m)
+        has_sub = "/" in g
+        h = (MAJOR_RAW if first else 0) \
+            + (SUB_RAW if has_sub and m in open_majors else 0)
+        if h > 0:
+            h += GAP
+            blocks.append(("SEC", g, h))
+        if m in open_majors and (not has_sub or g in open_subs):
+            for _ in range(row_count(g)):
+                blocks.append(("ROW", g, ROW))
+    blocks.append(("FOOTER", "", FOOTER))
+    return blocks
+
+
+def qml_stack():
+    v = root.stack()
+    if hasattr(v, "toVariant"):
+        return v.toVariant()
+    return v if v is not None else []
+
+
+def check_stack(label, open_majors, open_subs):
+    """Assert the realized delegate stack has no overlap and no hole.
+
+    Zero-height delegates occupy no space on either side, so both the
+    expected blocks and the realized stack drop them before the positional
+    walk (cumulative-y comparison with 0.5px tolerance).
+    """
+    # Sort by y: the criteria retrigger recreates section delegates, and
+    # contentItem.children order (creation order) is no longer the visual
+    # order -- the y coordinates are. SEC sorts before ROW at equal y.
+    got = [s for s in qml_stack() if float(s["h"]) > 0.5]
+    got.sort(key=lambda s: (float(s["y"]), 0 if s["tag"] == "SEC" else 1))
+    want = [b for b in expected_stack(open_majors, open_subs) if b[2] > 0]
+    if len(got) != len(want):
+        print(f"  [FAIL] {label}: stack size got {len(got)}, want {len(want)}")
+        for s in got:
+            print(f"      {s['tag']}:{s['key']} y={s['y']} h={s['h']}")
+        failures.append(f"{label}: stack size")
+        return
+    problems = []
+    y = 0.0
+    for i, (s, (etag, ekey, eh)) in enumerate(zip(got, want)):
+        stag = s["tag"]
+        if stag != etag or (etag == "SEC" and s["key"] != ekey) \
+                or (etag == "ROW" and s["key"] != ekey):
+            problems.append(f"pos {i}: got {stag}:{s['key']} want {etag}:{ekey}")
+        if abs(float(s["y"]) - y) > 0.5:
+            problems.append(f"pos {i} ({etag}:{ekey}): y={s['y']} want {y}")
+        if abs(float(s["h"]) - eh) > 0.5:
+            problems.append(f"pos {i} ({etag}:{ekey}): h={s['h']} want {eh}")
+        y += eh
+    if problems:
+        print(f"  [FAIL] {label}")
+        for p in problems:
+            print("     ", p)
+        failures.append(label)
+    else:
+        print(f"  [ok] {label}: {len(got)} stacked delegates, "
+              f"no overlap, no hole (cum height {y})")
+
+
 def qml_headers():
     """headers() result as plain Python data.
 
@@ -290,11 +392,20 @@ def check_headers(label, open_majors, open_subs, check_heights=True):
         print(f"  [FAIL] {label}: header count got {len(got)}, want {len(want)}")
         failures.append(f"{label}: header count")
         return
+    # Index by section key instead of zipping list order: the section
+    # relayout fix (criteria retrigger) recreates section delegates, and the
+    # creation order no longer matches the model order. The assertion is
+    # about each section's forked state, not about list order.
+    got_by_section = {}
+    for h in got:
+        got_by_section[h["section"]] = h
     problems = []
-    for h, w in zip(got, want):
+    for w in want:
         (w_section, mj_t, mj_h, mj_b, mj_v, sb_t, sb_h, sb_b, sb_v) = w
-        if h["section"] != w_section:
-            problems.append(f"{w_section}: section={h['section']!r}")
+        h = got_by_section.get(w_section)
+        if h is None:
+            problems.append(f"{w_section}: no section delegate found")
+            continue
         if h["majorTitle"] != mj_t:
             problems.append(f"{w_section}: majorTitle={h['majorTitle']!r} want {mj_t!r}")
         if h["subTitle"] != sb_t:
@@ -352,6 +463,7 @@ check("ListView row count == mock rows", root.listCount(), len(DATA))
 check_headers("headers, all expanded", set(MAJORS), set(SUBGROUPS))
 check_h("contentHeight, all expanded", root.listContentHeight(),
         expected_height(set(MAJORS), set(SUBGROUPS)))
+check_stack("stack, all expanded", set(MAJORS), set(SUBGROUPS))
 
 # --- groupCount reaches the model ---
 print("\n2. groupCount via model (full group strings; major totals are "
@@ -374,6 +486,7 @@ settle()
 check_h("contentHeight with Image collapsed", root.listContentHeight(),
         expected_height(open_majors, set(SUBGROUPS)))
 check_headers("headers with Image collapsed", open_majors, set(SUBGROUPS))
+check_stack("stack with Image collapsed", open_majors, set(SUBGROUPS))
 root.toggle("Image")
 
 # --- toggling a single sub leaves the major (and other subs) alone ---
@@ -386,10 +499,12 @@ open_subs = set(SUBGROUPS) - {"Image/Edit"}
 check_h("contentHeight with Image/Edit collapsed", root.listContentHeight(),
         expected_height(set(MAJORS), open_subs))
 check_headers("headers with Image/Edit collapsed", set(MAJORS), open_subs)
+check_stack("stack with Image/Edit collapsed", set(MAJORS), open_subs)
 root.toggle("Image/Edit")
 settle()
 check_h("contentHeight restored after sub toggle", root.listContentHeight(),
         expected_height(set(MAJORS), set(SUBGROUPS)))
+check_stack("stack restored after sub toggle", set(MAJORS), set(SUBGROUPS))
 
 # --- collapsing every key, then restoring, leaves no residue ---
 print("\n5. collapse all (majors + subs) then restore all")
@@ -431,6 +546,7 @@ settle()
 check_h("all subs collapsed, majors open", root.listContentHeight(),
         expected_height(set(MAJORS), set()))
 check_headers("headers, subs collapsed", set(MAJORS), set())
+check_stack("stack, subs collapsed", set(MAJORS), set())
 
 for m in MAJORS:
     root.toggle(m)
@@ -443,30 +559,70 @@ check_h("all majors collapsed (+ subs, which are hidden)",
 check_h("  == majors*(34+4) + 0*subHeader + footer(24)",
         all_collapsed, len(MAJORS) * 38 + 24)
 check_headers("headers, all majors collapsed", set(), set())
+check_stack("stack, all majors collapsed", set(), set())
 
 for g in SUBGROUPS:
     root.toggle(g)
 settle()
 check_h("subs re-expanded while majors collapsed (major gate holds)",
         root.listContentHeight(), expected_height(set(), set(SUBGROUPS)))
+check_stack("stack, subs re-expanded while majors collapsed", set(), set(SUBGROUPS))
 
 for m in MAJORS:
     root.toggle(m)
 settle()
 check_h("majors re-expanded (subs open again)", root.listContentHeight(),
         expected_height(set(MAJORS), set(SUBGROUPS)))
+check_stack("stack, majors re-expanded", set(MAJORS), set(SUBGROUPS))
 
 for g in SUBGROUPS:
     root.toggle(g)
 settle()
 check_h("majors open, subs collapsed", root.listContentHeight(),
         expected_height(set(MAJORS), set()))
+check_stack("stack, majors open subs collapsed", set(MAJORS), set())
 
 for g in SUBGROUPS:
     root.toggle(g)
 settle()
 check_h("fully restored", root.listContentHeight(),
         expected_height(set(MAJORS), set(SUBGROUPS)))
+check_stack("stack, fully restored", set(MAJORS), set(SUBGROUPS))
+
+# --- the reported bug: a section delegate's OWN height change must relayout ---
+# Repro: collapse a sub first (its rows are already zero-height), then toggle
+# the major. The major toggle now changes ONLY the section delegate's height
+# (subRow 28->0 behind the clip), so no item height changes at all. Qt 5.15's
+# ListView treats item-height changes as relayout triggers but not section
+# ones, so without the criteria-retrigger fix everything below stayed at its
+# old y (28px hole) and contentHeight stayed stale.
+print("\n9. pure section-height path (sub collapsed first, then the major)")
+root.toggle("Geometry/Format Convert")
+settle()
+sub_closed_subs = set(SUBGROUPS) - {"Geometry/Format Convert"}
+check_h("contentHeight, Geometry sub collapsed", root.listContentHeight(),
+        expected_height(set(MAJORS), sub_closed_subs))
+check_stack("stack, Geometry sub collapsed", set(MAJORS), sub_closed_subs)
+root.toggle("Geometry")
+settle()
+geom_closed_majors = set(MAJORS) - {"Geometry"}
+check_h("contentHeight, Geometry major collapsed (pure section path)",
+        root.listContentHeight(),
+        expected_height(geom_closed_majors, sub_closed_subs))
+check_stack("stack, Geometry major collapsed (pure section path)",
+        geom_closed_majors, sub_closed_subs)
+root.toggle("Geometry")
+settle()
+check_h("contentHeight, Geometry re-expanded (pure section path)",
+        root.listContentHeight(),
+        expected_height(set(MAJORS), sub_closed_subs))
+check_stack("stack, Geometry re-expanded (pure section path)",
+        set(MAJORS), sub_closed_subs)
+root.toggle("Geometry/Format Convert")
+settle()
+check_h("contentHeight, fully restored again", root.listContentHeight(),
+        expected_height(set(MAJORS), set(SUBGROUPS)))
+check_stack("stack, fully restored again", set(MAJORS), set(SUBGROUPS))
 
 print()
 if warnings:

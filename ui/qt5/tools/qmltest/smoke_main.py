@@ -51,7 +51,7 @@ from PySide2.QtGui import QGuiApplication  # noqa: E402
 from PySide2.QtQml import QQmlApplicationEngine  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mockmodel import MockModel, MockRunner  # noqa: E402
+from mockmodel import MockLayoutStore, MockModel, MockRunner  # noqa: E402
 
 qml_dir = os.path.abspath(sys.argv[1])
 
@@ -65,6 +65,7 @@ engine.addImportPath(qml_dir)
 # trap behaviour.py documents in its README).
 model = MockModel()
 runner = MockRunner()
+layout = MockLayoutStore()
 
 
 class _DummyLogger(QObject):
@@ -82,6 +83,8 @@ logger = _DummyLogger()
 engine.rootContext().setContextProperty("scriptModel", model)
 engine.rootContext().setContextProperty("scriptRunner", runner)
 engine.rootContext().setContextProperty("debugLogger", logger)
+# main.qml 启动期就读 layoutStore（折叠状态恢复），必须先于加载存在。
+engine.rootContext().setContextProperty("layoutStore", layout)
 # Empty request == plain start (main.qml's Component.onCompleted early-returns
 # on a falsy .script, so no ScriptModel.resolveScript call happens either).
 engine.rootContext().setContextProperty("startupRequest", {})

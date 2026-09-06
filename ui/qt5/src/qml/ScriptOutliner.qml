@@ -83,6 +83,43 @@ Item {
             next[k] = expandedGroups[k];
         next[key] = !isExpanded(key);
         expandedGroups = next;
+        // 折叠会改变 section delegate 的高度，而 Qt 5.15 的 ListView 对
+        // section delegate 高度变化不重排（详见下方 sectionRelayoutTimer
+        // 注释），等高度动画结束后重触发一次 section 布局。
+        sectionRelayoutTimer.restart();
+    }
+
+    // ---- 折叠后的 section 重排器 ----
+    // 【为什么需要】Qt 5.15 的 ListView 只把 item delegate 的高度变化当作
+    // 重排触发器。section delegate 自身高度变化（折叠大类时 subRow 28→0
+    // 带动整体 66→38）既不重排后面的 section/item，也不重算
+    // contentHeight —— 几何探针实测：先收子分类（脚本行已归零）再折
+    // 大类，下方 Image/Edit 永远停在旧 y，留出 28px 空洞；item 行没参与
+    // 动画时没有任何别的重排触发源，空洞永久存在。直接折全展开的大类
+    // 时 item 高度在同步动画，每帧触发自排把问题掩盖。
+    //
+    // 【实测过并否决的修法】
+    //   - listView.forceLayout()（含 Timer 周期性推）：只重排 item，
+    //     不重算 section 缓存，纯 section 路径 11 个序列里 3 个仍脏；
+    //   - 在 section delegate 的 onHeightChanged 里调 forceLayout：从
+    //     geometry change 通知内部重入布局 pass，delegate 被布局器整批
+    //     废掉（全部 h=0、visible=false）；
+    //   - section.property 赋 "" 再还原：会把本来正确的布局也打乱
+    //     （行叠进分组头），是最差的一个。
+    // 【采用】动画窗口结束（durFast=150ms + 余量）后把 section.criteria
+    // 换成 FirstCharacter 再立即换回 FullString：逼 ListView 作废全部
+    // section 状态、按当前 delegate 高度重建布局。两次赋值在同一个
+    // JS 调用里完成，中间不产生帧，重建过程不可见。折叠动画本身
+    // 完整保留；唯一代价是纯 section 路径下方内容在动画结束的那一帧
+    // 一次到位（而不是跟着 150ms 逐帧走）—— 压力探针 11 个折叠序列
+    // 全部几何断言通过。
+    Timer {
+        id: sectionRelayoutTimer
+        interval: Theme.durFast + 40
+        onTriggered: {
+            listView.section.criteria = ViewSection.FirstCharacter;
+            listView.section.criteria = ViewSection.FullString;
+        }
     }
 
     /// group 的第一段（"/" 之前）；不含 "/" 时就是 group 本身。
@@ -238,6 +275,12 @@ Item {
             // 像素都画不出来；零高度 MouseArea 也不参与命中测试。详见
             // docs/pitfalls/2026-09-06-positioner-invisible-child-height.md。
             clip: true
+
+            // 【section 高度变化不触发重排 —— 但这里不能顺手修】
+            // 见 root 上 sectionRelayoutTimer 的长注释。曾在此写
+            // onHeightChanged: listView.forceLayout()，实测是从 geometry
+            // change 通知里重入布局 pass，delegate 被布局器整批废掉
+            // （全部 h=0、visible=false，y 出现 131.6 这类破碎值）。
 
             Column {
                 anchors.left: parent.left
@@ -432,6 +475,10 @@ Item {
         Item {
             id: delegateRoot
             width: listView.width
+
+            // 测试锚点：behaviour.py 的几何探针据此定位脚本行并读取它
+            // 所属的 group（折叠后 h=0 的行不占位，靠这个名字区分 footer）。
+            objectName: "scriptRow"
 
             readonly property bool isValid: model.valid === true
             readonly property bool isDestructive: model.destructive === true

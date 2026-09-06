@@ -29,6 +29,21 @@ Window {
     readonly property int gap: 14
     readonly property int leftWidth: 260
 
+    // ---- 参数存档恢复 ----
+    // selectedInfo 赋值后 ParamEditor 会同步用默认值重建 values（其
+    // onParamsChanged），所以恢复必须等那一轮跑完 —— Qt.callLater 恰好
+    // 排在本轮全部同步求值之后。只覆盖当前契约里存在的参数名：脚本改过
+    // 参数名/删过参数后，旧存档里多出来的键静默丢弃，不会塞进 values。
+    function applySavedValues(savedValues) {
+        var merged = {};
+        for (var k in paramEditor.values)
+            merged[k] = paramEditor.values[k];
+        for (var k in savedValues)
+            if (k in merged)
+                merged[k] = savedValues[k];
+        paramEditor.values = merged;
+    }
+
     // ---- 最小化 / 还原动画（Windows 风格的简单缩放）----
     // 原生窗口最小化/还原是瞬间消失/出现；这里补一个贴近 Windows 观感的
     // 内容收起/展开：rootItem 以底部中心为原点 scale 1→0.9、opacity 1→0，
@@ -110,6 +125,11 @@ Window {
     // 触发 ParamEditor 的 values 初始化，所以这里拿到的就是脚本头里
     // 声明的默认值，不用额外等一帧。
     Component.onCompleted: {
+        // 布局存档只在启动时读一次（运行中不回读，见 LayoutStore）。
+        // 折叠表整体赋给 outliner 后，onExpandedGroupsChanged 会把它
+        // 原样存回去一次，幂等无害。
+        outliner.expandedGroups = layoutStore.expandedGroups();
+
         // 空 QVariantMap 在 QML 是空对象，.script 取出来是 undefined 而不是
         // ""，所以这里用真值判断而不是和空串比较。
         if (!startupRequest.script)
@@ -178,6 +198,7 @@ Window {
             height: rootItem.height - win.margin * 2
 
             ScriptOutliner {
+                id: outliner
                 anchors.fill: parent
                 // 上下留白比左右大：行自己已带 8px 内边距（Theme.rowPadding），
                 // 左右再给多了会让图标缩进看起来偏心。
@@ -189,8 +210,17 @@ Window {
                     detailName.text = name
                     detailPath.text = filePath
                     // 右面板按快照刷新拖放提示；校验以 validateDrop 为准。
+                    // 【顺序】savedValues 必须在 selectedInfo 赋值【之前】取：
+                    // selectedInfo 一变 ParamEditor 就用默认值重建 values，
+                    // onValuesChanged 会把"默认值"当成该脚本的当前参数存进
+                    // layoutStore，先存后取等于自己把自己的存档冲掉。
+                    var savedValues = layoutStore.scriptParams(filePath)
                     rightPanel.selectedInfo = scriptModel.scriptInfo(filePath)
+                    if (Object.keys(savedValues).length > 0)
+                        Qt.callLater(applySavedValues, savedValues)
                 }
+                // 折叠状态每次变化都交给 LayoutStore（内部防抖落盘）。
+                onExpandedGroupsChanged: layoutStore.saveExpandedGroups(expandedGroups)
             }
         }
 
@@ -251,6 +281,12 @@ Window {
                 anchors.topMargin: 14
                 anchors.bottomMargin: 4
                 params: rightPanel.selectedInfo.params || []
+                // 参数每次变化都进存档（内部防抖落盘）。没选中脚本时
+                // detailPath 为空，跳过 —— 不给空 key 写记录。
+                onValuesChanged: {
+                    if (detailPath.text !== "")
+                        layoutStore.saveScriptParams(detailPath.text, values)
+                }
             }
 
             // ---- 底部块：警示 / 提示 / 运行状态 / 输出尾部 ----

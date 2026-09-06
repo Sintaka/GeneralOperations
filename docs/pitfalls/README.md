@@ -10,3 +10,4 @@
 - [2026-09-06 Qt 5.15 的 section delegate 拿不到相邻 section 信息（ViewSection.previousSections 是 Qt 6 的）](2026-09-06-viewsection-previous-sections-qt5.md)
 - [2026-09-06 Canvas 随 resize 每帧主线程重绘（live resize 卡顿）](2026-09-06-canvas-resize-repaint.md)
 - [2026-09-06 Column 位置器跳过不可见子项的布局，但跳不过它的 height 属性值](2026-09-06-positioner-invisible-child-height.md)
+- [2026-09-07 Qt 5.15 ListView 对 section delegate 自身的高度变化不重排](2026-09-07-listview-section-relayout-qt5.md)

@@ -156,3 +156,29 @@ class MockRunner(QObject):
         pass
 
 
+
+
+class MockLayoutStore(QObject):
+    """LayoutStore（exe 旁 layout.json 的读写器）替身。
+
+    main.qml 在实例化期就读 layoutStore.expandedGroups()（启动恢复折叠
+    状态），并在 onScriptSelected 里调 scriptParams() —— 没有这个 stub
+    时每个引用都是一个 ReferenceError。真实实现的写方法有防抖落盘，mock
+    里存内存即可：测试关心的是调用链通、返回形状对（空字典 = 无存档）。
+    """
+
+    @Slot(result="QVariant")
+    def expandedGroups(self):
+        return {}
+
+    @Slot("QVariant")
+    def saveExpandedGroups(self, groups):
+        pass
+
+    @Slot(str, result="QVariant")
+    def scriptParams(self, scriptPath):
+        return {}
+
+    @Slot(str, "QVariant")
+    def saveScriptParams(self, scriptPath, values):
+        pass

@@ -4,6 +4,7 @@
 // QML 只认模型不认 core。依赖方向单向：qml → model → core。
 
 #include "debug/DropDebugLogger.h"
+#include "model/LayoutStore.h"
 #include "model/ScriptListModel.h"
 #include "model/ScriptRunner.h"
 
@@ -125,6 +126,10 @@ int main(int argc, char *argv[])
     // QGuiApplication::exec() 期间两者都活着。
     ScriptRunner scriptRunner(&scriptModel.registry());
 
+    // 运行时布局持久化（layout.json，exe 同目录）：折叠状态 + 各脚本
+    // 上次的参数。与 runner 同理挂栈上，engine 存活期间始终有效。
+    LayoutStore layoutStore(scriptsDir);
+
     QQmlApplicationEngine engine;
 
     // qrc 里的 App 模块（src/qml/App/qmldir）要靠这条才能被 import 解析到。
@@ -133,6 +138,7 @@ int main(int argc, char *argv[])
 
     engine.rootContext()->setContextProperty(QStringLiteral("scriptModel"), &scriptModel);
     engine.rootContext()->setContextProperty(QStringLiteral("scriptRunner"), &scriptRunner);
+    engine.rootContext()->setContextProperty(QStringLiteral("layoutStore"), &layoutStore);
 
     // ---- 拖放诊断模式（--dropdebug）----
     // 平台层事件过滤器 + QML 全屏 DropArea 双通道记录拖放的每一层，

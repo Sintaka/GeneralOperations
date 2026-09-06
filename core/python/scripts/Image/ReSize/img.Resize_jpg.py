@@ -7,7 +7,7 @@
 @multi       true
 @requires    Pillow
 
-@param  max_pixels : int : 1024 : 长边像素上限            : 256..16384 : presets 1024|2048|4096
+@param  max_pixels : int : 1024 : 长边像素上限            : 8..16384 : presets 512|1024|2048|4096|8192
 @param  quality    : int : 80   : JPEG 质量               : 1..100
 @param  workers    : int : 0    : 线程数(0=自动CPU数,上限8) : 0..64
 """

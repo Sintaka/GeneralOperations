@@ -55,10 +55,14 @@ engine.addImportPath(qml_dir)
 # be easy to miss among the expected noise. Held in a variable because
 # setContextProperty does not take ownership.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mockmodel import MockModel  # noqa: E402
+from mockmodel import MockModel, MockLayoutStore  # noqa: E402
 
 _model = MockModel()
 engine.rootContext().setContextProperty("scriptModel", _model)
+
+# main.qml 启动期就读 layoutStore（折叠状态恢复），必须先于加载存在。
+_layout = MockLayoutStore()
+engine.rootContext().setContextProperty("layoutStore", _layout)
 
 # main.qml reads more context properties than scriptModel -- C++ main.cpp
 # also supplies startupRequest / scriptRunner / dropDebugMode at runtime, and

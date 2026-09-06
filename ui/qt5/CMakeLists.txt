@@ -39,6 +39,10 @@ target_sources(GeneralOperationsLauncher PRIVATE
     src/model/ScriptListModel.h
     src/model/ScriptListModel.cpp
 
+    # model: 运行时布局持久化（exe 旁 layout.json）
+    src/model/LayoutStore.h
+    src/model/LayoutStore.cpp
+
     # runner: QProcess 托管脚本进程（拖放执行的落点）
     src/model/ScriptRunner.h
     src/model/ScriptRunner.cpp
