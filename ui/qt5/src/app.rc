@@ -1,0 +1,4 @@
+// exe 文件图标：资源管理器里看 exe、桌面快捷方式用的是这一份（链接期由
+// windres 编进 PE 资源）。运行时任务栏/Alt+Tab 的窗口图标走另一条通道，
+// 见 main.cpp 根窗口循环里的 setIcon。路径相对本 .rc 文件解析。
+IDI_ICON1 ICON "assets/app.ico"

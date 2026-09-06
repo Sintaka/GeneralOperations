@@ -1,0 +1,116 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "qt5-mingw",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "D:/Lib/Qt/5.15.2/mingw81_64",
+        "CMAKE_C_COMPILER": "D:/Lib/Qt/Tools/mingw810_64/bin/gcc.exe",
+        "CMAKE_CXX_COMPILER": "D:/Lib/Qt/Tools/mingw810_64/bin/g++.exe",
+        "CMAKE_MAKE_PROGRAM": "D:/Lib/Qt/Tools/Ninja/ninja.exe",
+        "CMAKE_RC_COMPILER": "D:/Lib/Qt/Tools/mingw810_64/bin/windres.exe",
+        "CMAKE_RC_FLAGS": "-c65001"
+      }
+    },
+    {
+      "name": "qt5-mingw-debug",
+      "inherits": "qt5-mingw",
+      "displayName": "qt5+python MinGW Debug (默认)",
+      "description": "GCC 8.1 + Qt5.15.2 mingw81_64。编译器/ninja 全绝对路径，不需要选 kit，不依赖 PATH。非 hidden preset 都显式带 GO_FRONTEND/GO_BACKEND —— 这是未来新前端 preset 的模板。",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "GO_FRONTEND": "qt5",
+        "GO_BACKEND": "python"
+      }
+    },
+    {
+      "name": "qt5-mingw-release",
+      "inherits": "qt5-mingw",
+      "displayName": "qt5+python MinGW Release (体积优化)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "GO_FRONTEND": "qt5",
+        "GO_BACKEND": "python"
+      }
+    },
+    {
+      "name": "qt5-msvc",
+      "hidden": true,
+      "inherits": "base",
+      "description": "保留备选：产物比 MinGW 小约 10MB，但需 VSCode 里选 MSVC v142/v143 amd64 kit 注入编译器环境。",
+      "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "D:/Lib/Qt/5.15.2/msvc2019_64"
+      }
+    },
+    {
+      "name": "qt5-msvc-debug",
+      "inherits": "qt5-msvc",
+      "displayName": "qt5+python MSVC Debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "GO_FRONTEND": "qt5",
+        "GO_BACKEND": "python"
+      }
+    },
+    {
+      "name": "qt5-msvc-release",
+      "inherits": "qt5-msvc",
+      "displayName": "qt5+python MSVC Release (体积最小)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "GO_FRONTEND": "qt5",
+        "GO_BACKEND": "python"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "qt5-mingw-debug",
+      "configurePreset": "qt5-mingw-debug"
+    },
+    {
+      "name": "qt5-mingw-release",
+      "configurePreset": "qt5-mingw-release"
+    },
+    {
+      "name": "qt5-mingw-deploy",
+      "configurePreset": "qt5-mingw-release",
+      "targets": [
+        "deploy"
+      ],
+      "displayName": "qt5 MinGW Release + windeployqt"
+    },
+    {
+      "name": "qt5-msvc-debug",
+      "configurePreset": "qt5-msvc-debug"
+    },
+    {
+      "name": "qt5-msvc-release",
+      "configurePreset": "qt5-msvc-release"
+    },
+    {
+      "name": "qt5-msvc-deploy",
+      "configurePreset": "qt5-msvc-release",
+      "targets": [
+        "deploy"
+      ],
+      "displayName": "qt5 MSVC Release + windeployqt"
+    }
+  ]
+}

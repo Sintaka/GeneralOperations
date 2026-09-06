@@ -1,0 +1,22 @@
+<RCC>
+    <qresource prefix="/">
+        <file>qml/main.qml</file>
+        <file>qml/Backdrop.qml</file>
+        <file>qml/GlassPanel.qml</file>
+        <file>qml/ScriptOutliner.qml</file>
+        <file>qml/Glyph.qml</file>
+        <file>qml/WindowControls.qml</file>
+        <file>qml/WindowResizer.qml</file>
+        <file>qml/DropZone.qml</file>
+        <file>qml/GlassSlider.qml</file>
+        <file>qml/ParamEditor.qml</file>
+
+        <!-- App 模块：qmldir 必须一起打进 qrc，否则 import App 1.0 解析不到 -->
+        <file>qml/App/qmldir</file>
+        <file>qml/App/Theme.qml</file>
+
+        <!-- 运行时窗口图标（main.cpp 里 QIcon(":/assets/app.ico")）；
+             exe 文件本身的图标不在这，走 app.rc 编进 PE 资源 -->
+        <file>assets/app.ico</file>
+    </qresource>
+</RCC>

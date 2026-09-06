@@ -1,0 +1,58 @@
+# core/python —— Python 内核脚本
+
+本目录是 monorepo 的**内核（core）层**：只含纯后端 Python 脚本，不含任何
+前端代码，也不构建任何东西（Python 没有"编译"步骤，`.py` 源码即交付物）。
+
+## 硬性规则：禁止依赖 Qt
+
+本目录脚本**禁止 `import` PyQt / PySide / qtpy 及任何 Qt 绑定**。
+Qt 只属于 ui/ 层的启动器前端；脚本与 GUI 框架、Python 环境完全解耦，才能跑在
+内嵌运行时、无 GUI 的部署形态里。打包期 CMake 会扫描本目录脚本，发现 Qt 依赖
+直接报错拦下。
+
+同理，脚本内不允许出现 `input()`、`os.system('pause')`、tkinter 等阻塞/自绘
+调用——脚本由启动器以子进程方式托管（契约详见根目录 `docs/SCRIPT_SPEC.md`）。
+
+## 目录内容
+
+```
+core/python/
+├── CMakeLists.txt   # 只做一件事：向父作用域导出 GO_PYTHON_SCRIPTS_DIR
+└── scripts/         # 全部内核脚本（启动器自动发现，见下文）
+```
+
+## 溯源映射表
+
+脚本源头是 `python/GeneralOperations` 源仓库（拖拽式脚本集），先由 Qt5 启动器
+仓库（`qt/GeneralOperations-Qt5/scripts/`）适配成带 docstring 契约头的版本，
+再原样迁入本目录。源项目 13 个文件的完整去向如下：
+
+| 源文件（python/GeneralOperations） | 现文件（core/python/scripts） | 说明 |
+|---|---|---|
+| geo.pmx2fbx.py | geo.pmx2fbx.py | 保留；适配为 `@host blender` 特例，Blender 路径改由脚本头 `@blender` 键声明，参数经 `--` 分隔符传入 |
+| geo.pmx2fbx_launch.bat | 未迁移 | 单文件 PMX→FBX 拖拽启动器（硬编码 Blender 路径、pause 阻塞、日志重定向），职责由 GUI 启动器接管 |
+| geo.pmx2fbx_launch_multi.bat | 未迁移 | 批量 PMX→FBX 拖拽启动器（调试日志 + 逐文件循环调用），职责由 GUI 启动器接管 |
+| img.EXR2PNG_SceneLinear_sRGB.Display.py | 合并入 img.EXR2PNG_Large.py | 全分辨率 EXR→PNG（ACES 显示变换）；新版把输出上限做成 `@param target`，target ≥ 原图长边时不缩放，等价原版 |
+| img.EXR2PNG_to4K_SceneLinear_sRGB.Display.py | 合并入 img.EXR2PNG_Large.py | 流式降采样 ≤4K 版（8K/16K 大图不爆内存）；即新版默认行为（target 默认 4096） |
+| img.FlipImage_Horizontal.py | img.FlipImage_Horizontal.py | 重写为 argparse + 契约头；Pillow 常规图与 OpenEXR 两条翻转路径保留 |
+| img.Resize_to_1k_jpg.py | 合并入 img.Resize_jpg.py | 与 2k/4k 版仅 `MAX_PIXELS = 1024` 一行之差；对应 `@param max_pixels` 预设档 1024 |
+| img.Resize_to_2k_jpg.py | 合并入 img.Resize_jpg.py | 原 `MAX_PIXELS = 2048`；对应预设档 2048 |
+| img.Resize_to_4k_jpg.py | 合并入 img.Resize_jpg.py | 原 `MAX_PIXELS = 4096`；对应预设档 4096 |
+| img.Zbrush_UDIM_Correction.py | img.Zbrush_UDIM_Correction.py | 重写为 argparse + 契约头，补 `@destructive`（原地翻转 EXR 像素并按行镜像重排 UDIM 编号） |
+| img.crossSplit.py | img.crossSplit.py | 重写为 argparse + 契约头；中心十字切四块逻辑不变 |
+| img.x2_0.bat | 未迁移 | Real-ESRGAN 2x 放大启动器（调用外部 realesrgan-ncnn-vulkan.exe），被 GUI 取代，暂无对应脚本 |
+| os.FlattenFolderHierarchy.py | os.FlattenFolderHierarchy.py | 重写为 argparse + 契约头；展平深度做成 `@param levels` |
+
+合并结果：13 个源文件 → 7 个内核脚本（5 个重写保留；5 个两两合并——
+EXR2PNG×2 → 1 个、Resize×3 → 1 个；3 个 .bat 启动器被 GUI 取代淘汰）。
+
+## 如何新增脚本
+
+1. 把一个 `.py` 放进 `scripts/`；
+2. 在文件开头写好 docstring 契约头（`@name` / `@group` / `@desc` / `@accepts`
+   为必填，规范与示例见根目录 `docs/SCRIPT_SPEC.md`）；
+3. 完成。启动器下次启动自动发现该脚本，C++ 侧与 CMake 侧都不用改——
+   `CMakeLists.txt` 只导出目录路径，不枚举文件。
+
+脚本硬规则（无 Qt 依赖、无阻塞调用、stdout 一行一条进度、退出码准确）同样
+见 `docs/SCRIPT_SPEC.md` 的"移植时的硬规则"一节。

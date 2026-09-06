@@ -1,0 +1,26 @@
+# 构建/产物
+build/
+output/
+# compile_commands.json 由 preset 的 CMAKE_EXPORT_COMPILE_COMMANDS 生成到
+# build/<preset>/ 下，但如果有人手动拷到根做 clangd 用，也不该入库
+compile_commands.json
+
+# 构建期下载缓存（Python embeddable 包、get-pip.py，见 cmake bundle 管线）
+.cache/
+
+# Python 运行时由启动器在首次运行时展开，不入库
+runtime/
+*.pyc
+__pycache__/
+
+# 拖放诊断日志（GeneralOperationsLauncher --dropdebug 生成，用完即删，
+# 见 docs/pitfalls/2026-09-06-dragdrop-urls-empty.md）
+.sandbox/
+dropdebug.log
+
+# ---- 以下三条为 ui/tauri2 前端预留（占位阶段并不产生这些目录）----
+# tauri2 若落地：node_modules/ = 前端 npm 依赖，dist/ = 前端构建产物，
+# target/ = Rust/Cargo 构建产物。先写进 .gitignore，防止接入当天忘记而误提交。
+node_modules/
+dist/
+target/
