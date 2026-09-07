@@ -100,11 +100,19 @@ class _StubRunner(QObject):
     def _tail(self):
         return ""
 
+    def _cancelled(self):
+        return False
+
     running = Property(bool, _running, notify=_changed)
     spawnError = Property(str, _spawnError, notify=_changed)
     hasRun = Property(bool, _hasRun, notify=_changed)
     lastExitCode = Property(int, _lastExitCode, notify=_changed)
     tail = Property(str, _tail, notify=_changed)
+    cancelled = Property(bool, _cancelled, notify=_changed)
+
+    @Slot()
+    def cancel(self):
+        pass
 
     @Slot(str, list, "QVariant")
     def run(self, script, files, values):

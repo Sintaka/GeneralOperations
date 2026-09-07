@@ -7,13 +7,13 @@
 @accepts     file
 @ext         .exr
 @multi       true
-@requires    numpy OpenColorIO OpenEXR Imath Pillow
+@requires    numpy OpenColorIO OpenEXR Imath Pillow OpenImageIO==3.1.14.0? opencv-python-headless==4.11.0.86? psutil==7.2.2?
 
 @param  target    : int  : 4096 : 输出长边像素上限                : 8..16384 : presets 1024|2048|4096|8192|16384
 @param  png_level : int  : 1    : PNG deflate 压缩等级             : 0..9
 @param  threads   : int  : 0    : 线程数(0=自动,min(CPU,8))        : 0..64
 @param  max_mem   : int  : 0    : 像素缓冲内存预算 MB(0=自动,可用内存70%) : 0..1048576
-@param  config    : str  : ""   : OCIO 配置文件路径(留空用 $OCIO 或内置默认)
+@param  config    : str  :      : OCIO 配置文件路径(留空用 $OCIO 或内置默认)
 @param  no_mip    : bool : false : 忽略嵌入的 mipmap(诊断用)
 @param  quiet     : bool : false : 减少逐文件输出
 
@@ -379,6 +379,7 @@ class OpenExrReader(object):
         self.y_off = dw.min.y
         ch = h["channels"]
         self.chan_names = list(ch.keys())
+        self.nchannels = len(self.chan_names)
         self.half = any(str(v.type) == "HALF" for v in ch.values())
         self.tiled = False
         self.mip_levels = []
@@ -399,7 +400,11 @@ class OpenExrReader(object):
             if all(c in comps for c in "RGB"):
                 return [comps["R"], comps["G"], comps["B"]]
         if "Y" in names:
-            return ["Y", "Y", "Y"]
+            return ["Y"]
+        # A lone beauty R channel is a valid grayscale image.  Keep this exact:
+        # do not guess at two-channel layouts, arbitrary AOVs, or alpha-only EXRs.
+        if names == ["R"]:
+            return ["R"]
         raise ReaderError("no RGB channels found in %s" % (names,))
 
     def rgb_channel_range(self):
@@ -413,7 +418,7 @@ class OpenExrReader(object):
     def read_band(self, y0, y1, width):
         FLOAT = Imath.PixelType(Imath.PixelType.FLOAT)
         rows = y1 - y0
-        out = np.empty((rows, width, 3), np.float32)
+        out = np.empty((rows, width, len(self._names)), np.float32)
         a = y0 + self.y_off
         b = y1 - 1 + self.y_off
         for ci, name in enumerate(self._names):
@@ -438,6 +443,9 @@ class OpenExrReader(object):
                 self._full[name] = np.frombuffer(raw, np.float32).reshape(
                     self.base_h, self.base_w)
             out[:, :, ci] = self._full[name][y0:y1]
+        if out.shape[2] == 1:
+            # Read grayscale sources once per band, then expand in memory.
+            return np.repeat(out, 3, axis=2)
         return out
 
     def close(self):

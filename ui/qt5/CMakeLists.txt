@@ -43,7 +43,9 @@ target_sources(GeneralOperationsLauncher PRIVATE
     src/model/LayoutStore.h
     src/model/LayoutStore.cpp
 
-    # runner: QProcess 托管脚本进程（拖放执行的落点）
+    # runner: QProcess + Windows Job Object 托管完整脚本进程树
+    src/model/ProcessTreeController.h
+    src/model/ProcessTreeController.cpp
     src/model/ScriptRunner.h
     src/model/ScriptRunner.cpp
 
@@ -60,6 +62,26 @@ endif()
 target_include_directories(GeneralOperationsLauncher PRIVATE src)
 
 target_link_libraries(GeneralOperationsLauncher PRIVATE Qt5::Quick)
+
+# ScriptRunner 的确定性自测：覆盖增量 UTF-8/容量截断，并在 Windows 上用
+# detached 后代的哨兵文件验证对外可见的整棵进程树取消语义。
+add_executable(script_runner_tests
+    tests/ScriptRunnerTests.cpp
+    src/core/ScriptManifest.h
+    src/core/ScriptManifest.cpp
+    src/core/ScriptRegistry.h
+    src/core/ScriptRegistry.cpp
+    src/model/ProcessTreeController.h
+    src/model/ProcessTreeController.cpp
+    src/model/ScriptRunner.h
+    src/model/ScriptRunner.cpp
+)
+target_include_directories(script_runner_tests PRIVATE src)
+target_link_libraries(script_runner_tests PRIVATE Qt5::Core)
+target_compile_definitions(script_runner_tests PRIVATE SCRIPT_RUNNER_ENABLE_TEST_HOOKS)
+enable_testing()
+add_test(NAME script_runner COMMAND script_runner_tests)
+set_tests_properties(script_runner PROPERTIES TIMEOUT 60)
 
 # 圆角窗口（main.cpp 的 DwmSetWindowAttribute）。MinGW 8.1 自带
 # libdwmapi.a，MSVC 的 SDK 也有，两边都不用额外配置。
@@ -94,6 +116,7 @@ if(MSVC)
         $<$<CONFIG:Release>:/GL>
         $<$<CONFIG:Release>:/Gy>
     )
+    target_compile_options(script_runner_tests PRIVATE /utf-8 /permissive- /W4 /wd4127)
     target_link_options(GeneralOperationsLauncher PRIVATE
         $<$<CONFIG:Release>:/LTCG>
         $<$<CONFIG:Release>:/OPT:REF>

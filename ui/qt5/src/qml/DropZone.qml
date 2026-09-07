@@ -250,7 +250,7 @@ Item {
                         names.push(s.substring(s.lastIndexOf("/") + 1));
                     }
                     if (files.length > 4)
-                        names.push("…和另外 " + (files.length - 4) + " 个");
+                        names.push(qsTr("…和另外 %1 个").arg(files.length - 4));
                     return names.join("\n");
                 }
                 color: Theme.textSecondary

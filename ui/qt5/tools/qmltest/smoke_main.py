@@ -1,28 +1,12 @@
-"""Smoke test that loads the REAL main.qml and counts Backdrop repaints.
+"""Load the real main.qml and exercise binding, rendering, and interaction.
 
-Two assertions in one load, mirroring how production instantiates the UI
-(main.cpp uses QQmlApplicationEngine, so a Window-root QML must go through
-QQmlApplicationEngine too -- QQuickView.setSource rejects a Window root with
-"invalid root object", found out the hard way; see the probe notes in
-docs/pitfalls/2026-09-06-canvas-resize-repaint.md):
+The smoke run mirrors production's QQmlApplicationEngine path and verifies:
+- no engine warnings;
+- Backdrop paints once and does not repaint across resize;
+- CommandOutput stays fixed-height, wraps, scrolls, and follows conditionally;
+- real mouse selection plus idle-copy/running-cancel Ctrl+C routing.
 
-1. Binding smoke: every binding in the real tree gets to run under the same
-   context-property stubs C++ supplies (scriptModel / scriptRunner /
-   debugLogger / startupRequest / dropDebugMode, all idle). The run fails on
-   any engine warning, exactly like qmlcheck.py.
-
-2. Backdrop repaint counter: the Canvas inside Backdrop must paint exactly
-   once (creation) and never again when the window resizes. This is the
-   assertable evidence for the live-resize fix: the old Backdrop re-issued
-   requestPaint() from onWidthChanged/onHeightChanged, so every resize step
-   ran the full-window JS radial-gradient repaint on the main thread
-   (Canvas.Cooperative) -- measurable as ~1 paint per resize. The fix pins
-   the canvas at 1600x900 and scales it; the counter must stay at 1 across
-   10 width changes. Canvas exposes the signal as `paint`; connecting one
-   more Python slot alongside the QML onPaint handler is safe and counts
-   every actual paint execution.
-
-Usage: smoke_main.py <qml_dir>   (same CLI as qmlcheck.py / behaviour.py)
+Usage: smoke_main.py <qml_dir>
 Exit code 0 = all checks passed, 1 = any failure.
 """
 import os
@@ -46,9 +30,10 @@ if sys.platform == "win32":
 # to EXEMPT_WARNINGS below; everything else still fails the run.
 EXEMPT_WARNINGS = ()  # reserved for "offscreen has no GL" noise only
 
-from PySide2.QtCore import QObject, QTimer, Slot  # noqa: E402
+from PySide2.QtCore import QObject, QPoint, Qt, QTimer, Slot  # noqa: E402
 from PySide2.QtGui import QGuiApplication  # noqa: E402
 from PySide2.QtQml import QQmlApplicationEngine  # noqa: E402
+from PySide2.QtTest import QTest  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mockmodel import MockLayoutStore, MockModel, MockRunner  # noqa: E402
@@ -119,6 +104,13 @@ def find_by_class(obj, needle):
     return None
 
 
+def find_by_object_name(obj, name):
+    for c in obj.findChildren(QObject):
+        if c.objectName() == name:
+            return c
+    return None
+
+
 backdrop = find_by_class(win, "Backdrop")
 canvas = find_by_class(backdrop, "Canvas") if backdrop is not None else None
 if backdrop is None or canvas is None:
@@ -178,8 +170,124 @@ total = paints[0]
 check("10 width changes -> onPaint total still exactly 1", total == 1,
       f"total={total} (baseline={baseline}, +{total - baseline} after resizes)")
 
-# ---- 3. warnings ----
-print("3. engine warnings")
+# ---- 3. command output: fixed geometry and follow-tail state machine ----
+print("3. command output behaviour")
+output = find_by_object_name(win, "commandOutput")
+output_view = find_by_object_name(win, "commandOutputFlickable")
+output_edit = find_by_object_name(win, "commandOutputTextEdit")
+run_status = find_by_object_name(win, "runStatus")
+check("command output objects found",
+      all(x is not None for x in (output, output_view, output_edit, run_status)))
+
+base_tail = "\n".join(
+    f"line {i:02d}: " + ("wrapped output " * 12) for i in range(30)
+)
+runner.setTail(base_tail)
+settle(300)
+
+if all(x is not None for x in (output, output_view, output_edit)):
+    def output_max_y():
+        return max(0.0, float(output_view.property("contentHeight"))
+                   - float(output_view.property("height")))
+
+    def output_y():
+        return float(output_view.property("contentY"))
+
+    check("output height stays fixed at 132", float(output.property("height")) == 132.0,
+          f"height={output.property('height')}")
+    check("long output wraps and becomes scrollable", output_max_y() > 0,
+          f"maxY={output_max_y()}")
+    check("initial output follows the tail", abs(output_y() - output_max_y()) <= 1.0,
+          f"y={output_y()}, maxY={output_max_y()}")
+
+    output_view.setProperty("contentY", 0.0)
+    settle(100)
+    check("user scroll up pauses following", output.property("followTail") is False)
+    paused_y = output_y()
+    runner.setTail(base_tail + "\nnew line while paused")
+    settle(200)
+    check("append preserves user scroll position", abs(output_y() - paused_y) <= 1.0,
+          f"y={output_y()}, paused={paused_y}")
+
+    output_view.setProperty("contentY", output_max_y())
+    settle(100)
+    check("returning to bottom resumes following", output.property("followTail") is True)
+    runner.setTail(base_tail + "\nnew line while paused\nnew line while following")
+    settle(200)
+    check("append follows after resume", abs(output_y() - output_max_y()) <= 1.0,
+          f"y={output_y()}, maxY={output_max_y()}")
+
+# ---- 4. real pointer/key routing through the loaded main.qml ----
+print("4. output selection and Ctrl+C routing")
+if output_view is not None and output_edit is not None:
+    def item_scene_point(item, x, y):
+        while item is not None:
+            x += float(item.property("x") or 0)
+            y += float(item.property("y") or 0)
+            item = item.parent()
+        return QPoint(round(x), round(y))
+
+    output_view.setProperty("contentY", 0.0)
+    settle(100)
+    output_edit.forceActiveFocus()
+    start = item_scene_point(output_edit, 4, 7)
+    end = item_scene_point(output_edit, 115, 7)
+    QTest.mousePress(win, Qt.LeftButton, Qt.NoModifier, start)
+    QTest.mouseMove(win, end, 80)
+    QTest.mouseRelease(win, Qt.LeftButton, Qt.NoModifier, end)
+    settle(100)
+
+    selected = output_edit.property("selectedText") or ""
+    check("mouse drag reaches TextEdit and selects output", len(selected) > 0,
+          f"selected={selected!r}")
+    check("selection pauses following", output.property("followTail") is False)
+
+    selection_start = output_edit.property("selectionStart")
+    selection_end = output_edit.property("selectionEnd")
+    runner.setTail(runner._tail_text + "\nappend with selection")
+    settle(200)
+    check("append preserves selection",
+          output_edit.property("selectionStart") == selection_start
+          and output_edit.property("selectionEnd") == selection_end,
+          f"selection={output_edit.property('selectionStart')}.."
+          f"{output_edit.property('selectionEnd')}")
+
+    clipboard = QGuiApplication.clipboard()
+    clipboard.clear()
+    runner.setRunning(False)
+    QTest.keyClick(win, Qt.Key_C, Qt.ControlModifier)
+    settle(100)
+    check("idle Ctrl+C copies selected output", clipboard.text() == selected,
+          f"clipboard={clipboard.text()!r}, selected={selected!r}")
+
+    QTest.keyClick(win, Qt.Key_A, Qt.ControlModifier)
+    settle(100)
+    check("keyboard selection works in read-only output",
+          len(output_edit.property("selectedText") or "")
+          == len(output_edit.property("text") or ""))
+
+    clipboard.setText("cancel-sentinel")
+    before_cancel = runner.cancel_calls
+    runner.setRunning(True)
+    settle(100)
+    QTest.keyClick(win, Qt.Key_C, Qt.ControlModifier)
+    settle(100)
+    check("running Ctrl+C calls cancel exactly once",
+          runner.cancel_calls == before_cancel + 1,
+          f"calls={runner.cancel_calls - before_cancel}")
+    check("running Ctrl+C is not also routed as copy",
+          clipboard.text() == "cancel-sentinel", f"clipboard={clipboard.text()!r}")
+    check("cancelled status is visible",
+          run_status is not None and run_status.property("text") == "执行已取消",
+          f"status={run_status.property('text') if run_status else None!r}")
+
+    runner.setTail("")
+    settle(100)
+    check("clearing output for a new run resets following",
+          output.property("followTail") is True)
+
+# ---- 5. warnings ----
+print("5. engine warnings")
 noise = [w for w in warnings if not any(x in w for x in EXEMPT_WARNINGS)]
 if noise:
     print(f"  [FAIL] {len(noise)} engine warning(s):")

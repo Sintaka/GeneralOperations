@@ -29,6 +29,16 @@ Window {
     readonly property int gap: 14
     readonly property int leftWidth: 260
 
+    // 运行中由窗口级快捷键独占 Ctrl+C；TextEdit 不再额外处理按键，因此一次
+    // 按键只会走一次 cancel()。空闲时禁用，Ctrl+C 继续交给有焦点的文本编辑器复制。
+    Shortcut {
+        sequence: "Ctrl+C"
+        context: Qt.WindowShortcut
+        autoRepeat: false
+        enabled: scriptRunner.running
+        onActivated: scriptRunner.cancel()
+    }
+
     // ---- 参数存档恢复 ----
     // selectedInfo 赋值后 ParamEditor 会同步用默认值重建 values（其
     // onParamsChanged），所以恢复必须等那一轮跑完 —— Qt.callLater 恰好
@@ -289,9 +299,9 @@ Window {
                 }
             }
 
-            // ---- 底部块：警示 / 提示 / 运行状态 / 输出尾部 ----
-            // 只锚 bottom，高度随内容向上长；ParamEditor 的 bottom 锚着
-            // 它的 top，输出变多时参数区自动让位。
+            // ---- 底部块：警示 / 提示 / 运行状态 / 固定高度输出框 ----
+            // 输出框高度固定，日志增长只改变内部 Flickable 的 contentHeight，
+            // 不再向上挤压参数区。
             Column {
                 id: bottomBlock
                 anchors.left: parent.left
@@ -316,11 +326,11 @@ Window {
                     visible: rightPanel.selectedInfo.accepts !== undefined
                     text: {
                         var i = rightPanel.selectedInfo;
-                        var what = i.accepts === "dir" ? "文件夹"
-                                 : i.accepts === "both" ? "文件或文件夹" : "文件";
+                        var what = i.accepts === "dir" ? qsTr("文件夹")
+                                 : i.accepts === "both" ? qsTr("文件或文件夹") : qsTr("文件");
                         var exts = i.extensions && i.extensions.length > 0
-                                 ? i.extensions.join(" / ") : "任意扩展名";
-                        var how = i.multi ? "可多选" : "一次一个";
+                                 ? i.extensions.join(" / ") : qsTr("任意扩展名");
+                        var how = i.multi ? qsTr("可多选") : qsTr("一次一个");
                         return qsTr("拖入%1执行 · %2 · %3").arg(what).arg(exts).arg(how);
                     }
                     color: Theme.textTertiary
@@ -331,6 +341,7 @@ Window {
 
                 Text {
                     id: runStatus
+                    objectName: "runStatus"
                     width: parent.width
                     visible: text !== ""
                     text: {
@@ -338,6 +349,8 @@ Window {
                             return qsTr("执行中…");
                         if (scriptRunner.spawnError !== "")
                             return scriptRunner.spawnError;
+                        if (scriptRunner.cancelled)
+                            return qsTr("执行已取消");
                         if (scriptRunner.hasRun)
                             return scriptRunner.lastExitCode === 0
                                 ? qsTr("执行完成")
@@ -345,6 +358,7 @@ Window {
                         return "";
                     }
                     color: scriptRunner.running ? Theme.accent
+                         : scriptRunner.cancelled ? Theme.textTertiary
                          : (scriptRunner.spawnError === "" && scriptRunner.lastExitCode === 0)
                          ? Theme.textSecondary : Theme.danger
                     font.family: Theme.fontFamily
@@ -355,17 +369,11 @@ Window {
                     }
                 }
 
-                Text {
+                CommandOutput {
                     width: parent.width
+                    height: 132
                     visible: scriptRunner.tail !== ""
                     text: scriptRunner.tail
-                    textFormat: Text.PlainText
-                    wrapMode: Text.WrapAnywhere
-                    color: Theme.textSecondary
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontMicro
-                    // 输出多于 12 行时 clip 到可用空间（tail 本身也只留 12 行）。
-                    clip: true
                 }
             }
 

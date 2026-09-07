@@ -113,47 +113,68 @@ class MockModel(QAbstractListModel):
 
 
 class MockRunner(QObject):
-    """Idle stand-in for the C++ ScriptRunner, for harnesses that load the
-    real main.qml (smoke_main.py).
+    """Stateful stand-in for ScriptRunner used by the real-main smoke test.
 
-    Same shape as qmlcheck.py's local _StubRunner -- main.qml reads exactly
-    these members at instantiation time (running / spawnError / hasRun /
-    lastExitCode / tail, all in the idle state), and run() exists because
-    main.qml's Component.onCompleted may call it for a CLI startup request.
-    No change signal is needed: the values never change in the mock, and
-    Property() requires some notify to be visible to bindings, so a never-
-    emitted Signal is attached.
-
-    @Slot/Property rules are the same as MockModel's: plain Python members
-    are invisible to QML.
+    It mirrors the QML-facing contract, including cancelled/cancel(). Tests may
+    change running and tail to exercise shortcut routing and output following.
     """
 
-    _changed = Signal()   # never emitted; values are constants
+    _changed = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self._is_running = False
+        self._was_cancelled = False
+        self._tail_text = ""
+        self.cancel_calls = 0
 
     def _running(self):
-        return False
+        return self._is_running
 
     def _spawnError(self):
         return ""
 
     def _hasRun(self):
-        return False
+        return self._was_cancelled
 
     def _lastExitCode(self):
         return 0
 
     def _tail(self):
-        return ""
+        return self._tail_text
+
+    def _cancelled(self):
+        return self._was_cancelled
 
     running = Property(bool, _running, notify=_changed)
     spawnError = Property(str, _spawnError, notify=_changed)
     hasRun = Property(bool, _hasRun, notify=_changed)
     lastExitCode = Property(int, _lastExitCode, notify=_changed)
     tail = Property(str, _tail, notify=_changed)
+    cancelled = Property(bool, _cancelled, notify=_changed)
+
+    def setRunning(self, value):
+        self._is_running = value
+        if value:
+            self._was_cancelled = False
+        self._changed.emit()
+
+    def setTail(self, value):
+        self._tail_text = value
+        self._changed.emit()
+
+    @Slot()
+    def cancel(self):
+        self.cancel_calls += 1
+        self._is_running = False
+        self._was_cancelled = True
+        self._changed.emit()
 
     @Slot(str, list, "QVariant")
     def run(self, script, files, values):
-        pass
+        self._is_running = True
+        self._was_cancelled = False
+        self._changed.emit()
 
 
 

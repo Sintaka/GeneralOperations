@@ -15,10 +15,14 @@ cmake_minimum_required(VERSION 3.21)
 # 否则"改一处版本号"就变成"改 N 处"，必然漏改。
 # 0.2.000 标记 monorepo 重构起点（旧 Qt5 单仓仓库止于 0.1.00x）。
 project(GeneralOperations
-    VERSION 0.2.007
+    VERSION 0.2.008
     DESCRIPTION "统一的脚本启动器 monorepo（多前端 x 多后端）"
     LANGUAGES CXX
 )
+
+# 必须在根目录启用 CTest：子目录内单独 enable_testing() 只生成子目录的
+# CTestTestfile.cmake，导致从根运行 ctest 时报告“No tests were found”。
+include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

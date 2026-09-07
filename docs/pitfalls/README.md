@@ -8,4 +8,5 @@
 
 ## 索引
 
+- [2026-09-07 Qt5 QProcess 在 Windows 上安全托管完整进程树](2026-09-07-qprocess-windows-job-object.md)
 - [2026-09-06 DOpus 拖入 URL 跨 QML→C++ 桥丢失 + OLE 延迟渲染](2026-09-06-dragdrop-urls-empty.md)

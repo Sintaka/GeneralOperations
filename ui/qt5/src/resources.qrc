@@ -8,6 +8,7 @@
         <file>qml/WindowControls.qml</file>
         <file>qml/WindowResizer.qml</file>
         <file>qml/DropZone.qml</file>
+        <file>qml/CommandOutput.qml</file>
         <file>qml/GlassSlider.qml</file>
         <file>qml/ParamEditor.qml</file>
 
