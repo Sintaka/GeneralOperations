@@ -11,8 +11,8 @@
 /// 这是 core 与 QML 之间唯一的桥：core 层不认识 QML，QML 也不直接碰
 /// ScriptRegistry。QML 里绝不写死 ListElement —— 数据一律从这里来。
 ///
-/// 分组交给 ListView 的 section.property: "group" 处理，所以模型不需要
-/// 插入"分组头"这种假行，前提是 registry 已按分组排好序（见 ScriptRegistry）。
+/// 模型只出扁平脚本行，分组头不进模型 —— 前端（ScriptOutliner）从 group
+/// role 自行推导两级树；前提是 registry 已按分组排好序（见 ScriptRegistry）。
 class ScriptListModel : public QAbstractListModel
 {
     Q_OBJECT

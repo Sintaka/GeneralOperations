@@ -361,7 +361,7 @@ Item {
 
             width: parent.width
             // 所属大类折叠时高度归零（150ms）；子分类自身的折叠只收脚本行、
-            // 这行保留。间隙份额（组间距）随高度一并归零。
+            // 这行保留。间隙份额（组间隙）随高度一并归零。
             height: root.isExpanded(root.groupMajor(modelData.key))
                 ? Theme.rowSubGroupHeight + Theme.groupGap : 0
             // 高度归零时内容是居中锚定的，不 clip 会探进上一行可视带
@@ -385,55 +385,68 @@ Item {
                     ColorAnimation { duration: Theme.durFast; easing.type: Theme.easing }
                 }
 
-                // ---- 图标槽 ----
-                // 常驻一个小箭头，不换文件夹 —— 它不是目录入口，是筛选开关，
-                // 箭头要始终指明"这行能折叠"。尺寸沿用 16px 图标槽，颜色压暗
-                // 一档与大类头的悬停箭头区分层级。
+                // 文字/图标不全程参与显现：高度动画是裁切式（clip 自上而下揭开），
+                // 文字若跟着裁切线一起露出来，会被切成半截、切边紧贴下一行，
+                // 视觉上读成"文字叠进相邻行"（真速实拍确认）。改为行高长到
+                // 最后 10px 区间才随高度线性淡入（此时文字已完整落在可视带内），
+                // 收起方向对称、文字先走。纯高度函数，与动画时长无关；
+                // 背板不参与门控，裁切揭开本身仍是可见的运动反馈。
                 Item {
-                    id: subIcon
-                    width: Theme.iconSlot
-                    height: Theme.iconSlot
-                    anchors.left: parent.left
-                    // 缩进对齐到脚本行的图标槽之后（标题与脚本行同 x）。
-                    anchors.leftMargin: Theme.rowPadding + Theme.iconSlot + Theme.iconGap
-                    anchors.verticalCenter: parent.verticalCenter
+                    id: subContent
+                    anchors.fill: parent
+                    opacity: Math.max(0, Math.min(1,
+                        (subRoot.height - (Theme.rowSubGroupHeight + Theme.groupGap - 10)) / 8))
 
-                    Glyph {
-                        anchors.fill: parent
-                        kind: Glyph.Kind.Chevron
-                        color: Theme.textTertiary
-                        rotation: root.isExpanded(modelData.key) ? 90 : 0
-                        Behavior on rotation {
-                            NumberAnimation { duration: Theme.durFast; easing.type: Theme.easing }
+                    // ---- 图标槽 ----
+                    // 常驻一个小箭头，不换文件夹 —— 它不是目录入口，是筛选开关，
+                    // 箭头要始终指明"这行能折叠"。尺寸沿用 16px 图标槽，颜色压暗
+                    // 一档与大类头的悬停箭头区分层级。
+                    Item {
+                        id: subIcon
+                        width: Theme.iconSlot
+                        height: Theme.iconSlot
+                        anchors.left: parent.left
+                        // 缩进对齐到脚本行的图标槽之后（标题与脚本行同 x）。
+                        anchors.leftMargin: Theme.rowPadding + Theme.iconSlot + Theme.iconGap
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        Glyph {
+                            anchors.fill: parent
+                            kind: Glyph.Kind.Chevron
+                            color: Theme.textTertiary
+                            rotation: root.isExpanded(modelData.key) ? 90 : 0
+                            Behavior on rotation {
+                                NumberAnimation { duration: Theme.durFast; easing.type: Theme.easing }
+                            }
                         }
                     }
-                }
 
-                Text {
-                    anchors.left: subIcon.right
-                    anchors.leftMargin: Theme.iconGap
-                    anchors.right: badgeText.left
-                    anchors.rightMargin: Theme.iconGap
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: modelData.label
-                    color: Theme.textSecondary
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontBody
-                    elide: Text.ElideRight
-                }
+                    Text {
+                        anchors.left: subIcon.right
+                        anchors.leftMargin: Theme.iconGap
+                        anchors.right: badgeText.left
+                        anchors.rightMargin: Theme.iconGap
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: modelData.label
+                        color: Theme.textSecondary
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontBody
+                        elide: Text.ElideRight
+                    }
 
-                // 折叠后看不见成员，给个数量提示（本子分类的成员数）。
-                Text {
-                    id: badgeText
-                    anchors.right: parent.right
-                    anchors.rightMargin: Theme.rowPadding
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: (root.model && root.model.groupCount)
-                        ? root.model.groupCount(modelData.key) : ""
-                    color: Theme.textTertiary
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontMicro
-                    visible: !root.isExpanded(modelData.key)
+                    // 折叠后看不见成员，给个数量提示（本子分类的成员数）。
+                    Text {
+                        id: badgeText
+                        anchors.right: parent.right
+                        anchors.rightMargin: Theme.rowPadding
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: (root.model && root.model.groupCount)
+                            ? root.model.groupCount(modelData.key) : ""
+                        color: Theme.textTertiary
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontMicro
+                        visible: !root.isExpanded(modelData.key)
+                    }
                 }
 
                 MouseArea {
@@ -506,68 +519,81 @@ Item {
                     ColorAnimation { duration: Theme.durFast; easing.type: Theme.easing }
                 }
 
-                // ---- 状态槽 ----
-                // 缩进就靠这个 16px 槽对齐到分组头的文件夹图标下方
-                // （dsh 注释里的 "indent step 22px = 16px slot + 6px gap"；
-                // 子分类头的缩进同样对齐到这里）。
+                // 文字/图标不全程参与显现：高度动画是裁切式（clip 自上而下揭开），
+                // 文字若跟着裁切线一起露出来，会被切成半截、切边紧贴下一行，
+                // 视觉上读成"文字叠进相邻行"（真速实拍确认）。改为行高长到
+                // 最后 10px 区间才随高度线性淡入（此时文字已完整落在可视带内），
+                // 收起方向对称、文字先走。纯高度函数，与动画时长无关；
+                // 背板不参与门控，裁切揭开本身仍是可见的运动反馈。
                 Item {
-                    id: rowIcon
-                    width: Theme.iconSlot
-                    height: Theme.iconSlot
-                    anchors.left: parent.left
-                    anchors.leftMargin: Theme.rowPadding
-                    anchors.verticalCenter: parent.verticalCenter
+                    id: rowContent
+                    anchors.fill: parent
+                    opacity: Math.max(0, Math.min(1,
+                        (delegateRoot.height - (Theme.rowItemHeight + Theme.rowGap - 10)) / 8))
 
-                    // 破坏性脚本：警告标记。这是安全相关的提示，
-                    // 必须常驻，不能只在悬停时出现。
-                    Glyph {
-                        anchors.fill: parent
-                        kind: Glyph.Kind.Bang
-                        color: Theme.danger
-                        visible: delegateRoot.isValid && delegateRoot.isDestructive
-                    }
-
-                    // 无效脚本：也用感叹号，但灰色 —— 它不是危险，是不可用。
-                    Glyph {
-                        anchors.fill: parent
-                        kind: Glyph.Kind.Bang
-                        color: Theme.textTertiary
-                        visible: !delegateRoot.isValid
-                    }
-                }
-
-                Text {
-                    id: rowTitle
-                    anchors.left: rowIcon.right
-                    anchors.leftMargin: Theme.iconGap
-                    anchors.right: rowActions.left
-                    anchors.rightMargin: Theme.iconGap
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: modelData.name
-                    // 无效脚本灰掉（不是隐藏）。破坏性脚本标题不染色 ——
-                    // 左边已经有红色感叹号了，标题再染一遍就过了。
-                    color: delegateRoot.isValid ? Theme.textPrimary : Theme.textTertiary
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontBody
-                    elide: Text.ElideRight
-                }
-
-                // ---- 行尾操作 ----
-                // dsh：只在悬停/菜单打开时出现。这里先放一个"更多"，
-                // 具体菜单是后续切片的事。
-                Row {
-                    id: rowActions
-                    anchors.right: parent.right
-                    anchors.rightMargin: Theme.rowPadding
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: Theme.actionGap
-                    visible: rowMouse.containsMouse && delegateRoot.isValid
-
-                    Glyph {
+                    // ---- 状态槽 ----
+                    // 缩进就靠这个 16px 槽对齐到分组头的文件夹图标下方
+                    // （dsh 注释里的 "indent step 22px = 16px slot + 6px gap"；
+                    // 子分类头的缩进同样对齐到这里）。
+                    Item {
+                        id: rowIcon
                         width: Theme.iconSlot
                         height: Theme.iconSlot
-                        kind: Glyph.Kind.Ellipsis
-                        color: Theme.textTertiary
+                        anchors.left: parent.left
+                        anchors.leftMargin: Theme.rowPadding
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        // 破坏性脚本：警告标记。这是安全相关的提示，
+                        // 必须常驻，不能只在悬停时出现。
+                        Glyph {
+                            anchors.fill: parent
+                            kind: Glyph.Kind.Bang
+                            color: Theme.danger
+                            visible: delegateRoot.isValid && delegateRoot.isDestructive
+                        }
+
+                        // 无效脚本：也用感叹号，但灰色 —— 它不是危险，是不可用。
+                        Glyph {
+                            anchors.fill: parent
+                            kind: Glyph.Kind.Bang
+                            color: Theme.textTertiary
+                            visible: !delegateRoot.isValid
+                        }
+                    }
+
+                    Text {
+                        id: rowTitle
+                        anchors.left: rowIcon.right
+                        anchors.leftMargin: Theme.iconGap
+                        anchors.right: rowActions.left
+                        anchors.rightMargin: Theme.iconGap
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: modelData.name
+                        // 无效脚本灰掉（不是隐藏）。破坏性脚本标题不染色 ——
+                        // 左边已经有红色感叹号了，标题再染一遍就过了。
+                        color: delegateRoot.isValid ? Theme.textPrimary : Theme.textTertiary
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontBody
+                        elide: Text.ElideRight
+                    }
+
+                    // ---- 行尾操作 ----
+                    // dsh：只在悬停/菜单打开时出现。这里先放一个"更多"，
+                    // 具体菜单是后续切片的事。
+                    Row {
+                        id: rowActions
+                        anchors.right: parent.right
+                        anchors.rightMargin: Theme.rowPadding
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: Theme.actionGap
+                        visible: rowMouse.containsMouse && delegateRoot.isValid
+
+                        Glyph {
+                            width: Theme.iconSlot
+                            height: Theme.iconSlot
+                            kind: Glyph.Kind.Ellipsis
+                            color: Theme.textTertiary
+                        }
                     }
                 }
 
