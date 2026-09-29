@@ -1,0 +1,51 @@
+{
+  "path_base": "repository-root",
+  "scope": "导航已核对的 monorepo 分层、Python 脚本契约与 Windows 共享环境启动器、Real-ESRGAN 图片放大与 Pillow 保底、Qt5 启动与运行链、Tauri 2 WebView/Rust 调用链及 C++ 内核。ui/qt6.8lts 仍是占位。",
+  "not_yet_mapped": [
+    "Qt 6.8 LTS 前端实现：ui/qt6.8lts/CMakeLists.txt 当前在配置时明确报错。"
+  ],
+  "features": [
+    {
+      "id": "monorepo-layout",
+      "name": "monorepo 分层与前端选择",
+      "keywords": ["ui", "core", "GO_FRONTEND", "qt5", "qt6.8lts", "tauri2", "GitHub Release", "Actions", "单向依赖", "架构"],
+      "doc": "docs/features/monorepo-layout.md",
+      "entrypoints": ["CMakeLists.txt", "core/python/CMakeLists.txt", "core/cpp/CMakeLists.txt", "ui/qt5/CMakeLists.txt", "tools/bundle.cmake", "tools/package_tauri2.ps1", ".github/workflows/release-tauri2.yml"]
+    },
+    {
+      "id": "python-script-contract",
+      "name": "Python 脚本目录与共享 docstring 解析",
+      "keywords": ["脚本清单", "SCRIPT_SPEC", "docstring", "go_script_manifest_core", "go_script_catalog", "@name", "@group", "@param", "@host", "@requires", "requirements JSON", "python-launcher", "runtime-check", "pip", "Windows Python 环境", "脚本目录"],
+      "doc": "docs/features/python-script-contract.md",
+      "entrypoints": ["core/python/CMakeLists.txt", "core/python/runtime/python-launcher.ps1", "core/python/runtime/runtime-check.py", "core/cpp/include/go/manifest/catalog.hpp", "tools/bundle.cmake", "core/python/scripts/Geometry/Format Convert/geo.pmx2glb.py", "docs/SCRIPT_SPEC.md", "ui/qt5/src/core/ScriptManifest.cpp", "ui/tauri2/src-tauri/src/manifest.rs"]
+    },
+    {
+      "id": "image-upscaling",
+      "name": "Real-ESRGAN 图片放大与 Pillow 保底",
+      "keywords": ["Real-ESRGAN", "img.RealESRGAN_Upscale", "AI 放大", "懒下载", "下载进度", "Vulkan 黑图", "Pillow LANCZOS", "非 AI 保底"],
+      "doc": "docs/features/image-upscaling.md",
+      "entrypoints": ["core/python/scripts/Image/ReSize/img.RealESRGAN_Upscale.py", "tests/test_realesrgan_lazy.py"]
+    },
+    {
+      "id": "qt5-launcher",
+      "name": "Qt5 启动器与脚本执行",
+      "keywords": ["启动器", "QML", "脚本树", "参数面板", "拖放", "ScriptRunner", "QProcess", "取消", "输出"],
+      "doc": "docs/features/qt5-launcher.md",
+      "entrypoints": ["ui/qt5/src/main.cpp", "ui/qt5/src/core/ScriptRegistry.cpp", "ui/qt5/src/model/ScriptListModel.cpp", "ui/qt5/src/model/ScriptRunner.cpp", "ui/qt5/src/qml/DropZone.qml"]
+    },
+    {
+      "id": "tauri2-launcher",
+      "name": "Tauri 2 WebView 启动器与 Rust 运行器",
+      "keywords": ["tauri2", "Tauri", "Rust", "WebView2", "IPC", "invoke", "脚本清单", "script-catalog-cache.json", "清单缓存", "自绘标题栏", "窗口控制", "最小化", "关闭窗口", "module docstring", "Missing module docstring declaration", "CARGO_TARGET_DIR", "tauri2-cargo-target", "构建缓存", "子进程", "run_script", "拖放"],
+      "doc": "docs/features/tauri2-launcher.md",
+      "entrypoints": ["ui/tauri2/src/main.ts", "ui/tauri2/src/styles.css", "ui/tauri2/src-tauri/tauri.conf.json", "ui/tauri2/src-tauri/capabilities/default.json", "ui/tauri2/scripts/build-env.mjs", "tools/package_tauri2.ps1", "ui/tauri2/src-tauri/src/main.rs", "ui/tauri2/src-tauri/src/commands.rs", "ui/tauri2/src-tauri/src/manifest.rs", "ui/tauri2/src-tauri/src/runner.rs"]
+    },
+    {
+      "id": "cpp-backends",
+      "name": "C++ 内核、共享声明解析与 PMX→GLB 后端",
+      "keywords": ["C++", "go_core_cpp", "go_script_manifest_core", "go_script_catalog", "go_pmx2glb", "PMX", "GLB", "UDIM", "水平翻转", "@host exe"],
+      "doc": "docs/features/cpp-backends.md",
+      "entrypoints": ["core/cpp/CMakeLists.txt", "core/cpp/include/go/core/flip.hpp", "core/cpp/include/go/manifest/catalog.hpp", "core/cpp/include/go/pmx2glb/convert.hpp", "core/cpp/src/pmx2glb/main.cpp"]
+    }
+  ]
+}

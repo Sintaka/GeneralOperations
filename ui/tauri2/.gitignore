@@ -1,0 +1,9 @@
+/node_modules/
+/dist/
+/.npm-cache/
+/src-tauri/.cargo-home/
+/src-tauri/Cargo.toml
+/src-tauri/icons/icon.ico
+/src-tauri/target/
+/src-tauri/gen/
+/.cargo-home/

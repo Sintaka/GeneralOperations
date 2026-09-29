@@ -1,0 +1,69 @@
+{
+  "path_base": "repository-root",
+  "feature_map": "docs/feature-map.yaml",
+  "scope": "当前可复用分流项覆盖 Qt5 拖入文件未被接受、Windows Python 环境仍报告依赖缺失或重复准备、Tauri2 脚本取消与清单加载慢、脚本声明缺失及构建后 UI 目录异常膨胀；只提供首轮取证线索，不固定历史根因。",
+  "symptoms": [
+    {
+      "id": "qt5-file-drop-not-accepted",
+      "symptom": "Qt5 拖入文件时显示不接受、提示没有有效文件，或悬停可接受但松手后未执行",
+      "aliases": ["拖入文件没反应", "没有拖入有效的文件", "DOpus 拖入失败", "拖放后脚本没启动"],
+      "feature_ids": ["qt5-launcher"],
+      "first_checks": [
+        "用 --dropdebug 复现一次，比较平台层 DragEnter/Drop 的 hasUrls/urls 与 QML 层 DropZone entered/dropped 的 rawUrls/result。若平台 hasUrls 为真而 QML entered 的 rawUrls 为空，沿 drag.urls 到 validateDrop 的桥接输入继续取证；若两层都没有 URL，先确认来源应用实际拖出了文件 URL。",
+        "若悬停校验返回 uncertain 或空 files，比较 onDropped 的重新校验结果：悬停阶段可能尚无可用路径，松手时应重新读取；若松手仍为空，检查原始 URL 经 toLocalPath 后的候选路径是否存在。",
+        "若松手结果已有 files 但被拒绝，读取 result.reason，并对照所选脚本的 @accepts、@ext、@multi 与输入类型、扩展名及数量；若校验通过仍未启动，再看 ScriptRunner 的预检错误和运行状态。"
+      ]
+    },
+    {
+      "id": "windows-python-requirement-missing",
+      "symptom": "Windows 脚本仍报告已安装的 @requires 包缺失，或每次运行都重新准备 Python 环境",
+      "aliases": ["Python 说缺少已安装的包", "重复安装 Python 依赖", "Windows Python 环境反复初始化"],
+      "feature_ids": ["python-script-contract"],
+      "first_checks": [
+        "记录启动器输出中实际选用的解释器路径与 runtime/venv 路径，并与 GO_RUNTIME_HOME 或默认 %LOCALAPPDATA%\\GeneralOperations\\runtime 对照；路径每次变化时先查运行进程的环境和候选解释器发现结果。",
+        "查看启动前进程是否设置了 PYTHONNOUSERSITE、PYTHONPATH 或 PYTHONHOME，并对照 wrapper 输出的 CPython 基础探测、依赖探测和 pip 检查/安装输出。共用 helper 会在 Python/pip 子进程环境中移除这三个变量；若被选解释器仍报缺包，沿该解释器的导入/版本结果和 wheel 安装结果继续区分解释器不匹配与安装失败。"
+      ]
+    },
+    {
+      "id": "tauri2-run-cancelled-after-python-setup",
+      "symptom": "Tauri2 依赖安装成功后运行图片脚本，却显示任务已取消或长时间没有脚本进度",
+      "aliases": ["Real-ESRGAN 运行后任务已取消", "Python 依赖就绪后没反应", "图片放大运行后取消"],
+      "feature_ids": ["tauri2-launcher", "python-script-contract", "image-upscaling"],
+      "first_checks": [
+        "先核对所运行 exe 同级 python-launcher.ps1 与脚本版本，并看日志是否已经出现环境就绪、开始执行脚本；若只看到 pip 安装成功，继续等启动器的依赖复查及脚本启动日志，不能据此认定脚本已经执行。",
+        "若状态为任务已取消，核对该 run_id 是否收到 stop_script 请求；当前 Tauri2 仅在运行记录被标记取消时发出 cancelled，拖放和依赖安装本身不会设置此标记。若状态是运行失败而非取消，优先看退出码和脚本 stderr。",
+        "若脚本已启动但 Real-ESRGAN 长时间无图片结果，先看本地工具缓存、下载/校验进度及 runtime/tools/.realesrgan-download-*.zip 的写入时间和大小；临时 zip 持续增长说明正在下载，任务被终止后留下部分 zip 说明下载曾被中断。若工具退出码为零但日志有 vkQueueSubmit/vkWaitForFences failed 或输出全黑，按 Vulkan 失败分流并核对 Pillow 非 AI 保底结果。"
+      ]
+    },
+    {
+      "id": "tauri2-catalog-load-slow",
+      "symptom": "打开 Tauri2 窗口后长时间停在正在读取脚本清单",
+      "aliases": ["打开窗口加载脚本清单很慢", "启动界面卡在自检", "Tauri2 启动清单卡住"],
+      "feature_ids": ["tauri2-launcher", "python-script-contract"],
+      "first_checks": [
+        "区分窗口已经出现但状态仍是正在读取脚本清单，与点击运行脚本后 Python 环境准备慢；前者沿 WebView initialize 的事件注册及 list_scripts → Rust manifest 缓存/共享 catalog CLI 取证，后者按 Windows Python 环境条目分流。",
+        "核对 exe 同级 script-catalog-cache.json 的绝对 scripts 根路径、catalog 工具路径及解析器/脚本内容指纹与文件元数据快照；缓存缺失、损坏或源文件变化时应重新生成。若命中缓存仍慢，分别计时 WebView 事件注册、IPC 往返和列表渲染；事件注册失败应有显式错误，避免把耗时归于 Python/pip。"
+      ]
+    },
+    {
+      "id": "tauri2-module-docstring-missing",
+      "symptom": "Tauri2 把已有声明的 Python 脚本标为 Missing module docstring declaration",
+      "aliases": ["脚本声明有误", "EXR2PNG 在 Tauri2 无法运行", "Missing module docstring declaration"],
+      "feature_ids": ["tauri2-launcher", "python-script-contract"],
+      "first_checks": [
+        "比较发行包 scripts/ 下的目标脚本与 core/python/scripts/ 源文件开头，确认模块三引号声明存在且两份内容一致；若只在发行包缺失，先检查 bundle 装配或旧包残留。",
+        "若 docstring 前是 shebang、编码声明、空行或整行注释，用随包 go_script_catalog --check --root <scripts目录> 验证共享解析结果；若 CLI 判为有效而 Tauri2 仍报错，检查 Rust 调用的是否是同级工具及 JSON 适配。若三引号前已有实际 Python 语句，则先修正脚本布局。"
+      ]
+    },
+    {
+      "id": "tauri2-build-artifacts-in-ui",
+      "symptom": "运行 Tauri2 构建后 ui/tauri2 占用数 GB，Cargo 产物出现在 src-tauri/target",
+      "aliases": ["ui 文件夹几个 G", "Tauri build 写进 src", "Cargo target 没进 build"],
+      "feature_ids": ["tauri2-launcher", "monorepo-layout"],
+      "first_checks": [
+        "分别量出 ui/tauri2/src-tauri/target、.cargo-home、.npm-cache 与 node_modules 的体积；若 target 占主要空间，核对本次 dev/build/test 命令的 CARGO_TARGET_DIR 是否指向仓库根 build/tauri2-cargo-target。",
+        "若 Cargo 路径已正确而旧目录仍很大，检查它是否只是迁移前遗留的可重建产物；若 npm 缓存重新出现在 ui，运行 npm config get cache 区分项目级配置与调用时环境覆盖。"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+# 构建/产物
+build/
+output/
+# compile_commands.json 由 preset 的 CMAKE_EXPORT_COMPILE_COMMANDS 生成到
+# build/<preset>/ 下，但如果有人手动拷到根做 clangd 用，也不该入库
+compile_commands.json
+
+# 历史构建缓存与联网诊断缓存；Tauri 当前缓存统一放 build/
+.cache/
+
+# Python 运行时由启动器在首次运行时展开，不入库
+/runtime/
+*.pyc
+__pycache__/
+
+# 拖放诊断日志（GeneralOperationsLauncher --dropdebug 生成，用完即删，
+# 见 docs/pitfalls/2026-09-06-dragdrop-urls-empty.md）
+.sandbox/
+dropdebug.log
+
+# Tauri 2：npm/Cargo 产物及由根 CMake 版本动态生成的 Cargo 清单。
+node_modules/
+dist/
+target/
+ui/tauri2/src-tauri/Cargo.toml

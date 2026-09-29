@@ -1,0 +1,149 @@
+// VS Code 任务（JSONC：VS Code 允许注释，但改完请剥注释过一遍 JSON 校验）。
+//
+// 命名规则：任务名带 (qt5-debug)/(qt5-release) 段，对应 CMakePresets.json 里的
+// qt5-mingw-debug / qt5-mingw-release。Tauri 2 走 npm/Cargo，任务位于下方。
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "配置 (qt5-debug)",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--preset", "qt5-mingw-debug"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "生成 (qt5-debug)",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "--preset", "qt5-mingw-debug"],
+      "dependsOn": ["配置 (qt5-debug)"],
+      "dependsOrder": "sequence",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$gcc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "配置（如需）+ 编译 + POST_BUILD 自动装配 output/x64-qt5/Debug（Qt 运行时 + scripts + 内嵌 Python）"
+    },
+    {
+      "label": "运行 (qt5-debug)",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/qt5-mingw-debug/GeneralOperationsLauncher.exe",
+      "dependsOn": "生成 (qt5-debug)",
+      // cwd 指到 exe 目录：保证产物以"最终运行环境"的方式被启动，
+      // 与双击 exe 的行为一致（开发期脚本目录解析依赖它）。
+      "options": { "cwd": "${workspaceFolder}/build/qt5-mingw-debug" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "配置 (qt5-release)",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--preset", "qt5-mingw-release"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "发行 zip (qt5-release)",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "--preset", "qt5-mingw-release", "--target", "release_zip"],
+      "dependsOn": ["配置 (qt5-release)"],
+      "dependsOrder": "sequence",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$gcc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "配置（如需）+ 构建 Release + 装配 output/x64-qt5/Release + 压成 output/ 下的发行 zip"
+    },
+    {
+      "label": "运行 (qt5 发行包)",
+      "type": "shell",
+      "command": "${workspaceFolder}/output/x64-qt5/Release/GeneralOperationsLauncher.exe",
+      // 发行包是自包含目录，直接在包内启动，顺带验证"拷到别的目录也能跑"的前提。
+      "options": { "cwd": "${workspaceFolder}/output/x64-qt5/Release" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "detail": "直接运行 output 自包含产物（需先跑过'发行 zip (qt5-release)'或手动构建过 qt5-mingw-release）"
+    },
+    {
+      "label": "配置 (tauri2)",
+      "type": "shell",
+      "command": "npm.cmd",
+      "args": ["ci"],
+      "options": { "cwd": "${workspaceFolder}/ui/tauri2" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "运行 (tauri2)",
+      "type": "shell",
+      "command": "npm.cmd",
+      "args": ["run", "dev"],
+      "dependsOn": "配置 (tauri2)",
+      "dependsOrder": "sequence",
+      "options": { "cwd": "${workspaceFolder}/ui/tauri2" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "生成 (tauri2-release)",
+      "type": "shell",
+      "command": "npm.cmd",
+      "args": ["run", "build"],
+      "dependsOn": "配置 (tauri2)",
+      "dependsOrder": "sequence",
+      "options": { "cwd": "${workspaceFolder}/ui/tauri2" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "发行 zip (tauri2-release)",
+      "type": "shell",
+      "command": "powershell.exe",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/tools/package_tauri2.ps1"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "单测 (core/cpp)",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "--preset", "qt5-mingw-debug", "--target", "go_core_cpp_tests"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$gcc"],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "detail": "只构建 core/cpp 的测试目标（C++ 内核测试与前端无关，用默认 debug preset 即可）"
+    },
+    {
+      "label": "单测运行 (core/cpp)",
+      "type": "shell",
+      "command": "ctest",
+      "args": ["--test-dir", "build/qt5-mingw-debug", "--output-on-failure"],
+      "dependsOn": ["单测 (core/cpp)"],
+      "dependsOrder": "sequence",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "仓库卫生检查",
+      "type": "shell",
+      "command": "python",
+      "args": ["tools/check_repo.py"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "清理构建目录",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["-E", "rm", "-rf", "build"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    }
+  ]
+}

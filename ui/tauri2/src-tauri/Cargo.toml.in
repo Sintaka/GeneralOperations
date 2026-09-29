@@ -1,0 +1,15 @@
+[package]
+name = "general-operations-tauri"
+version = "@@VERSION@@"
+description = "GeneralOperations Tauri 2 frontend"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2" }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2" }
+tauri-plugin-dialog = "2"
+tokio = { version = "1", features = ["process", "io-util", "sync"] }

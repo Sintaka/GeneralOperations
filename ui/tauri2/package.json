@@ -1,0 +1,28 @@
+{
+  "name": "general-operations-tauri",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync-version": "node scripts/sync-version.mjs",
+    "predev": "npm run sync-version && node scripts/generate-icon.mjs && node scripts/build-backend.mjs Debug",
+    "dev": "node scripts/tauri.mjs dev",
+    "prebuild": "npm run sync-version && node scripts/generate-icon.mjs && node scripts/build-backend.mjs Release",
+    "build": "node scripts/tauri.mjs build --no-bundle",
+    "frontend:dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "frontend:build": "tsc --noEmit && vite build",
+    "check": "npm run sync-version && tsc --noEmit",
+    "pretest": "node scripts/build-backend.mjs Debug",
+    "test": "node scripts/test-render-safety.mjs && node scripts/cargo.mjs test",
+    "check:rust": "node scripts/cargo.mjs check",
+    "clippy": "node scripts/cargo.mjs clippy -- -D warnings"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^6.0.0"
+  }
+}

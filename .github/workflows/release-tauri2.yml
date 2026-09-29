@@ -1,0 +1,136 @@
+name: Release Tauri 2
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release-tauri2:
+    name: Build and release Tauri 2 portable zip
+    runs-on: windows-2025
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up UCRT64 C++ compiler
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          release: false
+          update: true
+          install: mingw-w64-ucrt-x86_64-gcc
+
+      - name: Read version and reject an existing release
+        id: release-version
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $rootCMake = Get-Content -LiteralPath 'CMakeLists.txt' -Raw
+          $versions = [regex]::Matches($rootCMake, '(?is)\bproject\s*\([^)]*?\bVERSION\s+(0\.2\.\d{3})\b')
+          if ($versions.Count -ne 1) {
+            throw "Expected exactly one root project VERSION 0.2.xxx; found $($versions.Count)."
+          }
+
+          $version = $versions[0].Groups[1].Value
+          $tag = "v$version"
+          $headers = @{
+            Accept = 'application/vnd.github+json'
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $releaseUrl = "https://api.github.com/repos/$($env:GITHUB_REPOSITORY)/releases/tags/$tag"
+          $response = Invoke-WebRequest -Uri $releaseUrl -Headers $headers -Method Get -SkipHttpErrorCheck
+          if ($response.StatusCode -eq 200) {
+            throw "Release $tag already exists; refusing to overwrite it."
+          }
+          if ($response.StatusCode -ne 404) {
+            throw "Could not confirm whether release $tag exists (HTTP $($response.StatusCode))."
+          }
+
+          $tagUrl = "https://api.github.com/repos/$($env:GITHUB_REPOSITORY)/git/ref/tags/$tag"
+          $tagResponse = Invoke-WebRequest -Uri $tagUrl -Headers $headers -Method Get -SkipHttpErrorCheck
+          if ($tagResponse.StatusCode -eq 200) {
+            throw "Git tag $tag already exists without a Release; refusing to reuse it."
+          }
+          if ($tagResponse.StatusCode -ne 404) {
+            throw "Could not confirm whether git tag $tag exists (HTTP $($tagResponse.StatusCode))."
+          }
+
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "version=$version"
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "tag=$tag"
+
+      - name: Build Tauri 2 portable zip
+        id: package
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.release-version.outputs.version }}
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $mingwBin = Join-Path $env:MSYS2_LOCATION 'ucrt64\bin'
+          $compiler = Join-Path $mingwBin 'g++.exe'
+          if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
+            throw "MSYS2 UCRT64 compiler is missing: $compiler"
+          }
+          $env:Path = "$mingwBin;$env:Path"
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $mingwBin
+
+          foreach ($name in @('node.exe', 'npm.cmd', 'cargo.exe', 'rustc.exe', 'cmake.exe', 'ninja.exe', 'gh.exe')) {
+            $command = Get-Command $name -ErrorAction SilentlyContinue
+            if (-not $command) { throw "Required build or release tool is missing: $name" }
+            Write-Host "$name => $($command.Source)"
+          }
+          foreach ($name in @('node.exe', 'npm.cmd', 'cargo.exe', 'rustc.exe', 'cmake.exe', 'ninja.exe', 'gh.exe', 'g++.exe')) {
+            & $name --version
+            if ($LASTEXITCODE -ne 0) { throw "$name --version failed with exit code $LASTEXITCODE" }
+          }
+          $target = (& g++.exe -dumpmachine | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $target -ne 'x86_64-w64-mingw32') {
+            throw "Expected the x64 MinGW compiler target; got '$target'."
+          }
+
+          & .\tools\package_tauri2.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Tauri 2 packaging failed with exit code $LASTEXITCODE" }
+
+          $asset = Join-Path $PWD ("output/GeneralOperations-{0}_x64-tauri2-release.zip" -f $env:VERSION)
+          if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) {
+            throw "Expected versioned Tauri 2 package is missing: $asset"
+          }
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "asset=$asset"
+
+      - name: Verify slim zip
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.release-version.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $asset = Join-Path $PWD ("output/GeneralOperations-{0}_x64-tauri2-release.zip" -f $env:VERSION)
+          & .\tools\verify_slim_zip.ps1 -ZipPath $asset -RepoRoot $PWD -UiKind tauri2
+          if ($LASTEXITCODE -ne 0) { throw "Slim zip verification failed with exit code $LASTEXITCODE" }
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release-version.outputs.tag }}
+          RELEASE_ASSET: ${{ steps.package.outputs.asset }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & gh release create $env:RELEASE_TAG $env:RELEASE_ASSET `
+            --repo $env:GITHUB_REPOSITORY `
+            --title $env:RELEASE_TAG `
+            --notes 'Windows x64 Tauri 2 portable zip; Python is prepared on demand on the target machine.' `
+            --target $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub Release creation failed with exit code $LASTEXITCODE."
+          }
